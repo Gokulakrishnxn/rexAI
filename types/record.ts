@@ -1,3 +1,5 @@
+export type IngestionStatus = 'pending' | 'uploading' | 'processing' | 'complete' | 'error';
+
 export interface HealthRecord {
   id: string;
   type: 'lab' | 'prescription' | 'imaging' | 'other';
@@ -9,4 +11,13 @@ export interface HealthRecord {
   extracted?: Record<string, unknown>;
   doctor?: string;
   hospital?: string;
+
+  // Supabase fields
+  supabaseUrl?: string;
+  storagePath?: string;
+  documentId?: string;
+
+  // Ingestion status
+  ingestionStatus: IngestionStatus;
+  ingestionError?: string;
 }

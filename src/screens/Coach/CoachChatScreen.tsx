@@ -21,6 +21,11 @@ import { useChatStore, ChatSession } from '../../store/useChatStore';
 import { useRecordsStore } from '../../store/useRecordsStore';
 import { CustomMessageBubble } from '../../components/chat/CustomMessageBubble';
 import { ResponsiveContainer } from '@/components/ui/ResponsiveContainer';
+import { sendChatMessage, createSession, fetchSessions, fetchSessionMessages } from '@/services/api/backendApi';
+import { useUserStore } from '../../store/useUserStore';
+import { ActivityIndicator, Dimensions } from 'react-native';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 
 export function CoachChatScreen() {
@@ -31,20 +36,73 @@ export function CoachChatScreen() {
   const [inputText, setInputText] = useState('');
   const [mentionQuery, setMentionQuery] = useState('');
   const [showMentions, setShowMentions] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+  const { profile } = useUserStore();
+  const { updateChat } = useChatStore();
+  const USER_ID = profile?.id || '123e4567-e89b-12d3-a456-426614174000';
 
   // Get current active chat
   const currentChat = useMemo(() => {
     return chats.find(c => c.id === currentChatId);
   }, [chats, currentChatId]);
 
-  // Create first chat if none exists
+  const { setChats, setMessages } = useChatStore();
+
+  // Load sessions from backend on mount
   React.useEffect(() => {
-    if (chats.length === 0) {
-      createNewChat();
-    } else if (!currentChatId) {
-      switchChat(chats[0].id);
-    }
-  }, [chats.length, currentChatId]);
+    const loadSessions = async () => {
+      try {
+        const sessions = await fetchSessions(USER_ID);
+        if (sessions && sessions.length > 0) {
+          const formattedSessions: ChatSession[] = sessions.map((s: any) => ({
+            id: s.id,
+            title: s.title,
+            messages: [],
+            createdAt: new Date(s.created_at),
+            backendSessionId: s.id
+          }));
+          setChats(formattedSessions);
+
+          // Switch to most recent
+          switchChat(formattedSessions[0].id);
+        } else {
+          // If no sessions, create one
+          handleNewChat();
+        }
+      } catch (error) {
+        console.error('Error loading sessions:', error);
+      }
+    };
+    loadSessions();
+  }, [USER_ID]);
+
+  // Load messages when current chat changes
+  React.useEffect(() => {
+    const loadMessages = async () => {
+      if (currentChatId && currentChat && currentChat.messages.length === 0) {
+        try {
+          const msgs = await fetchSessionMessages(currentChatId);
+          if (msgs && msgs.length > 0) {
+            const formattedMsgs = msgs.map((m: any) => ({
+              id: m.id,
+              text: m.content,
+              userId: m.role === 'user' ? 'user' : 'coach',
+              createdAt: new Date(m.created_at)
+            }));
+            setMessages(currentChatId, formattedMsgs);
+          }
+        } catch (error) {
+          console.error('Error loading messages:', error);
+        }
+      }
+    };
+    loadMessages();
+  }, [currentChatId]);
+
+  const handleNewChat = () => {
+    createNewChat();
+    setOpenHistory(false);
+  };
 
   // Convert store messages to GiftedChat format
   const giftedMessages: IMessage[] = useMemo(() => {
@@ -61,11 +119,11 @@ export function CoachChatScreen() {
     }));
   }, [currentChat?.messages]);
 
-  const onSend = useCallback((newMessages: IMessage[] = []) => {
-    if (newMessages.length > 0 && currentChatId) {
+  const onSend = useCallback(async (newMessages: IMessage[] = []) => {
+    if (newMessages.length > 0 && currentChatId && currentChat) {
       const msg = newMessages[0];
 
-      // Add user message
+      // Add user message locally
       addMessage(currentChatId, {
         id: Date.now().toString(),
         text: msg.text,
@@ -73,17 +131,54 @@ export function CoachChatScreen() {
         createdAt: new Date(),
       });
 
-      // Simulate AI response
-      setTimeout(() => {
+      setIsTyping(true);
+
+      try {
+        let backendSessionId = currentChat.backendSessionId;
+
+        // Create backend session if it doesn't exist
+        if (!backendSessionId) {
+          const session = await createSession(USER_ID, msg.text.substring(0, 30));
+          if (session) {
+            backendSessionId = session.id;
+            updateChat(currentChatId, { backendSessionId });
+          }
+        }
+
+        // Send to backend RAG
+        const chatResponse = await sendChatMessage({
+          userId: USER_ID,
+          question: msg.text,
+          sessionId: backendSessionId
+        });
+
+        if (chatResponse.success) {
+          addMessage(currentChatId, {
+            id: Date.now().toString(),
+            text: chatResponse.answer,
+            userId: 'coach',
+            createdAt: new Date(),
+          });
+        } else {
+          addMessage(currentChatId, {
+            id: Date.now().toString(),
+            text: "Sorry, I encountered an error: " + (chatResponse.error || "Unknown error"),
+            userId: 'coach',
+            createdAt: new Date(),
+          });
+        }
+      } catch (error: any) {
         addMessage(currentChatId, {
-          id: (Date.now() + 1).toString(),
-          text: "I'm Rex, your medical AI. How can I assist you with your records today?",
+          id: Date.now().toString(),
+          text: "I'm having trouble connecting to my brain. Please try again later.",
           userId: 'coach',
           createdAt: new Date(),
         });
-      }, 1000);
+      } finally {
+        setIsTyping(false);
+      }
     }
-  }, [addMessage, currentChatId]);
+  }, [addMessage, currentChatId, currentChat, USER_ID, updateChat]);
 
 
   const renderBubble = (props: any) => {
@@ -227,7 +322,7 @@ export function CoachChatScreen() {
                 {...composerProps}
                 placeholderTextColor="#8E8E93"
                 textInputStyle={{
-                  color: 'white',
+                  color: '#FFFFFF',
                   fontSize: 16,
                   paddingTop: 8,
                   marginLeft: 4,
@@ -335,6 +430,7 @@ export function CoachChatScreen() {
                   _id: 'user',
                   name: 'You',
                 }}
+
                 renderBubble={renderBubble}
                 renderInputToolbar={renderInputToolbar}
                 renderSend={renderSend}
@@ -344,6 +440,7 @@ export function CoachChatScreen() {
                 }}
                 isSendButtonAlwaysVisible={true}
                 minInputToolbarHeight={70}
+                isTyping={isTyping}
                 messagesContainerStyle={{
                   backgroundColor: '#000000',
                   paddingBottom: 20,
@@ -358,8 +455,8 @@ export function CoachChatScreen() {
           modal={true}
           open={openHistory}
           onOpenChange={setOpenHistory}
-          snapPoints={[85]}
-          dismissOnSnapToBottom
+          snapPoints={[100]}
+          dismissOnSnapToBottom={false}
           zIndex={200000}
         >
           <Sheet.Overlay
@@ -367,56 +464,71 @@ export function CoachChatScreen() {
             exitStyle={{ opacity: 0 }}
             backgroundColor="rgba(0,0,0,0.8)"
           />
-          <Sheet.Frame backgroundColor="#1C1C1E" borderTopLeftRadius={20} borderTopRightRadius={20}>
-            <Sheet.Handle />
-            <YStack padding="$4" gap="$4">
-              <Text fontSize="$6" fontWeight="700" color="white" marginBottom="$2">
-                Chat History
-              </Text>
-              <RNScrollView>
+          <Sheet.Frame
+            backgroundColor="#1C1C1E"
+            width={SCREEN_WIDTH * 0.75}
+            height="100%"
+            borderTopLeftRadius={0}
+            borderBottomLeftRadius={0}
+            borderTopRightRadius={20}
+            borderBottomRightRadius={20}
+          >
+            <YStack padding="$5" gap="$5" flex={1}>
+              <XStack alignItems="center" justifyContent="space-between" marginBottom="$2" marginTop="$4">
+                <Text fontSize="$7" fontWeight="800" color="white">History</Text>
+                <XStack gap="$2">
+                  <Button
+                    size="$3"
+                    circular
+                    backgroundColor="$blue10"
+                    icon={<Ionicons name="add" size={20} color="white" />}
+                    onPress={handleNewChat}
+                  />
+                  <Button
+                    size="$3"
+                    circular
+                    backgroundColor="#2C2C2E"
+                    icon={<Ionicons name="close" size={20} color="white" />}
+                    onPress={() => setOpenHistory(false)}
+                  />
+                </XStack>
+              </XStack>
+
+              <RNScrollView showsVerticalScrollIndicator={false}>
                 <YStack gap="$2">
                   {chats.map((chat) => (
-                    <XStack
+                    <Card
                       key={chat.id}
                       padding="$3"
+                      backgroundColor={currentChatId === chat.id ? '#2C2C2E' : 'transparent'}
+                      pressStyle={{ backgroundColor: '#2C2C2E' }}
                       borderRadius="$4"
-                      backgroundColor={currentChatId === chat.id ? "#2C2C2E" : "transparent"}
                       onPress={() => {
                         switchChat(chat.id);
                         setOpenHistory(false);
                       }}
-                      alignItems="center"
-                      justifyContent="space-between"
+                      borderWidth={currentChatId === chat.id ? 1 : 0}
+                      borderColor="$blue10"
                     >
                       <XStack gap="$3" alignItems="center">
-                        <Ionicons name="chatbubble-outline" size={20} color="white" />
-                        <YStack>
-                          <Text color="white" fontWeight="600">
-                            {chat.messages[0]?.text?.substring(0, 30) || chat.title}
+                        <Ionicons
+                          name="chatbubble-ellipses-outline"
+                          size={20}
+                          color={currentChatId === chat.id ? '#3B82F6' : '#8E8E93'}
+                        />
+                        <YStack flex={1}>
+                          <Text color="white" fontWeight={currentChatId === chat.id ? "700" : "500"} numberOfLines={1}>
+                            {chat.title}
                           </Text>
-                          <Text fontSize="$2" color="#8E8E93">
-                            {new Date(chat.createdAt).toLocaleDateString()}
+                          <Text color="#8E8E93" fontSize="$2" marginTop="$1">
+                            {new Date(chat.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                           </Text>
                         </YStack>
                       </XStack>
-                      {currentChatId === chat.id && (
-                        <Ionicons name="checkmark" size={20} color="#007AFF" />
-                      )}
-                    </XStack>
+                    </Card>
                   ))}
                 </YStack>
               </RNScrollView>
-
-              <Button
-                marginTop="$4"
-                backgroundColor="$blue10"
-                onPress={() => {
-                  createNewChat();
-                  setOpenHistory(false);
-                }}
-              >
-                New Chat
-              </Button>
             </YStack>
           </Sheet.Frame>
         </Sheet>

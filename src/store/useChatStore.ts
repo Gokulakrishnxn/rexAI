@@ -12,14 +12,17 @@ export interface ChatSession {
   title: string;
   messages: ChatMessage[];
   createdAt: Date;
+  backendSessionId?: string;
 }
 
 interface ChatState {
   chats: ChatSession[];
   currentChatId: string | null;
   setChats: (sessions: ChatSession[]) => void;
+  setMessages: (chatId: string, messages: ChatMessage[]) => void;
   addMessage: (chatId: string, m: ChatMessage) => void;
-  createNewChat: () => string;
+  createNewChat: (id?: string, title?: string, backendSessionId?: string) => string;
+  updateChat: (id: string, updates: Partial<ChatSession>) => void;
   switchChat: (id: string) => void;
   deleteChat: (id: string) => void;
 }
@@ -28,6 +31,11 @@ export const useChatStore = create<ChatState>((set) => ({
   chats: [],
   currentChatId: null,
   setChats: (sessions) => set({ chats: sessions }),
+  setMessages: (chatId, messages) => set((s) => ({
+    chats: s.chats.map(chat =>
+      chat.id === chatId ? { ...chat, messages } : chat
+    )
+  })),
   addMessage: (chatId, m) => set((s) => ({
     chats: s.chats.map(chat =>
       chat.id === chatId
@@ -35,19 +43,23 @@ export const useChatStore = create<ChatState>((set) => ({
         : chat
     )
   })),
-  createNewChat: () => {
-    const id = Date.now().toString();
+  updateChat: (id, updates) => set((s) => ({
+    chats: s.chats.map(chat => chat.id === id ? { ...chat, ...updates } : chat)
+  })),
+  createNewChat: (id, title, backendSessionId) => {
+    const newId = id || Date.now().toString();
     const newChat: ChatSession = {
-      id,
-      title: 'New Chat',
+      id: newId,
+      title: title || 'New Chat',
       messages: [],
       createdAt: new Date(),
+      backendSessionId,
     };
     set((s) => ({
       chats: [newChat, ...s.chats],
-      currentChatId: id,
+      currentChatId: newId,
     }));
-    return id;
+    return newId;
   },
   switchChat: (id) => set({ currentChatId: id }),
   deleteChat: (id) => set((s) => ({

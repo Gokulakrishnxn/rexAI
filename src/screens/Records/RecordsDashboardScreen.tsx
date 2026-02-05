@@ -15,16 +15,17 @@ import {
   ScrollView,
 } from 'tamagui';
 import * as DocumentPicker from 'expo-document-picker';
-import { HeaderWave } from '@/components/ui/HeaderWave';
 import { ResponsiveContainer } from '@/components/ui/ResponsiveContainer';
 import { Ionicons } from '@expo/vector-icons';
 import { useRecordsStore } from '../../store/useRecordsStore';
 import { useMedAgentStore } from '../../store/useMedAgentStore';
 import { useUserStore } from '../../store/useUserStore';
-import { RecordCard } from '../../components/ui/RecordCard';
-import { MedicationCard } from '../../components/ui/MedicationCard';
 import type { RecordsStackParamList } from '../../navigation/stacks/RecordsStack';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { uploadToStorage, deleteFromStorage } from '@/services/supabase';
+import { triggerIngestion, fetchUserDocuments } from '@/services/api/backendApi';
+import { Alert, ActivityIndicator, View } from 'react-native';
+import { HealthRecord, IngestionStatus } from '../../../types/record';
 
 type NavigationProp = NativeStackNavigationProp<RecordsStackParamList>;
 
@@ -77,13 +78,68 @@ export function RecordsDashboardScreen() {
   const { records } = useRecordsStore();
   const { activeMeds, compliance } = useMedAgentStore();
   const { profile } = useUserStore();
-  const { addRecord } = useRecordsStore();
+  const { setRecords, addRecord } = useRecordsStore();
   const [activeTab, setActiveTab] = useState('timeline');
+  const [loading, setLoading] = useState(true);
+
+  const [uploading, setUploading] = useState(false);
+  const USER_ID = profile?.id || '123e4567-e89b-12d3-a456-426614174000';
+
+  React.useEffect(() => {
+    const loadRecords = async () => {
+      try {
+        const docs = await fetchUserDocuments(USER_ID);
+        if (docs && docs.length > 0) {
+          const formattedRecords: HealthRecord[] = docs.map((doc: any) => ({
+            id: doc.id,
+            type: (doc.file_type?.includes('image') ? 'imaging' : doc.file_type?.includes('pdf') ? 'lab' : 'other') as any,
+            title: doc.file_name,
+            date: doc.created_at,
+            summary: doc.summary,
+            doctor: 'AI Extracted',
+            hospital: 'My Health',
+            ingestionStatus: 'complete',
+            documentId: doc.id,
+            storagePath: doc.file_url,
+          }));
+          setRecords(formattedRecords);
+        }
+      } catch (error) {
+        console.error('Error fetching records:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadRecords();
+  }, [USER_ID]);
+
+  const getStatusColor = (status: IngestionStatus): string => {
+    switch (status) {
+      case 'complete': return '#4ADE80';
+      case 'processing': return '#3B82F6';
+      case 'uploading': return '#F59E0B';
+      case 'error': return '#EF4444';
+      default: return '#9CA3AF';
+    }
+  };
+
+  const getStatusText = (status: IngestionStatus): string => {
+    switch (status) {
+      case 'complete': return 'Processed';
+      case 'processing': return 'Processing...';
+      case 'uploading': return 'Uploading...';
+      case 'error': return 'Failed';
+      default: return 'Pending';
+    }
+  };
+
+  const { updateRecord, removeRecord } = useRecordsStore();
 
   const handleUpload = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: '*/*', // Allow all file types
+        type: ['application/pdf', 'image/*'],
         copyToCacheDirectory: true,
       });
 
@@ -91,28 +147,99 @@ export function RecordsDashboardScreen() {
 
       const { assets } = result;
       if (assets && assets[0]) {
+        setUploading(true);
         const file = assets[0];
+        const recordId = Date.now().toString();
 
-        // Create a new record from the uploaded file
-        const newRecord = {
-          id: Date.now().toString(),
-          type: 'other', // Default type for uploads
+        // Create a new record with uploading status
+        const newRecord: HealthRecord = {
+          id: recordId,
+          type: file.mimeType?.includes('image') ? 'imaging' : file.mimeType?.includes('pdf') ? 'lab' : 'other',
           title: file.name,
           date: new Date().toISOString(),
           fileUri: file.uri,
-          doctor: 'Uploaded',
+          doctor: 'Pending Data Extraction',
+          ingestionStatus: 'uploading'
         };
 
-        // Add to store (simulating storage)
-        // Note: In a real app, you'd upload this to a server/storage bucket first
-        addRecord(newRecord as any); // Type assertion needed until full compatibility
+        addRecord(newRecord);
 
-        // Optional: Navigate to detail or show success feedback
-        // For now, we'll just let the list update
+        try {
+          // Step 1: Upload to Storage
+          const { url, path } = await uploadToStorage(
+            USER_ID,
+            file.uri,
+            file.name,
+            file.mimeType || 'application/octet-stream'
+          );
+
+          updateRecord(recordId, {
+            supabaseUrl: url,
+            storagePath: path,
+            ingestionStatus: 'processing',
+          });
+
+          // Step 2: Trigger ingestion
+          const ingestResult = await triggerIngestion({
+            userId: USER_ID,
+            fileUrl: url,
+            fileName: file.name,
+            fileType: file.mimeType || 'application/octet-stream',
+          });
+
+          if (ingestResult.success) {
+            updateRecord(recordId, {
+              documentId: ingestResult.documentId,
+              summary: ingestResult.summary,
+              ingestionStatus: 'complete',
+              doctor: 'Extracted via AI'
+            });
+          } else {
+            updateRecord(recordId, {
+              ingestionStatus: 'error',
+              ingestionError: ingestResult.error,
+            });
+            Alert.alert('Processing Failed', ingestResult.error || 'Unknown error');
+          }
+        } catch (e: any) {
+          console.error('Upload/Ingestion error:', e);
+          updateRecord(recordId, {
+            ingestionStatus: 'error',
+            ingestionError: e.message,
+          });
+          Alert.alert('Error', 'Failed to process file: ' + e.message);
+        } finally {
+          setUploading(false);
+        }
       }
     } catch (error) {
       console.error('Error picking document:', error);
+      setUploading(false);
     }
+  };
+
+  const handleDelete = async (record: HealthRecord) => {
+    Alert.alert(
+      "Delete Record",
+      "Are you sure you want to delete this record?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            if (record.storagePath) {
+              try {
+                await deleteFromStorage(record.storagePath);
+              } catch (e) {
+                console.warn('Failed to delete from storage:', e);
+              }
+            }
+            removeRecord(record.id);
+          }
+        }
+      ]
+    );
   };
 
   // Mock data for demo
@@ -120,10 +247,10 @@ export function RecordsDashboardScreen() {
   const allergies = profile?.allergies || ['Penicillin', 'Peanuts'];
   const vaccinations = ['COVID-19 (2023)', 'Flu (2024)'];
 
-  const timelineRecords = records.length > 0 ? records : [
-    { id: '1', type: 'lab', title: 'Complete Blood Count', date: '2024-01-15', doctor: 'Dr. Smith', hospital: 'City Hospital' },
-    { id: '2', type: 'prescription', title: 'Metformin 500mg', date: '2024-01-10', doctor: 'Dr. Johnson' },
-    { id: '3', type: 'imaging', title: 'Chest X-Ray', date: '2024-01-05', hospital: 'Medical Center' },
+  const timelineRecords: HealthRecord[] = records.length > 0 ? records : [
+    { id: '1', type: 'lab', title: 'Complete Blood Count', date: '2024-01-15', doctor: 'Dr. Smith', hospital: 'City Hospital', ingestionStatus: 'complete' },
+    { id: '2', type: 'prescription', title: 'Metformin 500mg', date: '2024-01-10', doctor: 'Dr. Johnson', ingestionStatus: 'complete' },
+    { id: '3', type: 'imaging', title: 'Chest X-Ray', date: '2024-01-05', hospital: 'Medical Center', ingestionStatus: 'complete' },
   ];
 
   const prescriptions = activeMeds.length > 0 ? activeMeds : [
@@ -143,6 +270,14 @@ export function RecordsDashboardScreen() {
   const complianceRate = prescriptions.length > 0
     ? Object.values(compliance).filter(Boolean).length / prescriptions.length
     : 0;
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000000' }}>
+        <ActivityIndicator size="large" color="#007AFF" />
+      </View>
+    );
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#000000' }}>
@@ -289,15 +424,25 @@ export function RecordsDashboardScreen() {
                             <Text fontSize="$5" fontWeight="700" color="white" lineHeight={22}>
                               {record.title}
                             </Text>
-                            <Text fontSize="$3" color="#3B82F6" fontWeight="500">
-                              {record.type === 'lab' ? 'labResult' : record.type}
-                            </Text>
-                          </YStack>
-                          {record.id === '2' && ( // Mock tag for demo
-                            <XStack backgroundColor="#451a03" paddingHorizontal="$2" paddingVertical="$1" borderRadius="$4" borderWidth={1} borderColor="#f59e0b">
-                              <Text fontSize="$2" color="#f59e0b" fontWeight="600">Duplicate</Text>
+                            <XStack alignItems="center" gap="$2">
+                              <Text fontSize="$3" color="#3B82F6" fontWeight="500">
+                                {record.type === 'lab' ? 'labResult' : record.type}
+                              </Text>
+                              <XStack alignItems="center" gap="$1.5">
+                                <XStack width={6} height={6} borderRadius={3} backgroundColor={getStatusColor(record.ingestionStatus)} />
+                                <Text fontSize="$2" color={getStatusColor(record.ingestionStatus)} fontWeight="600">
+                                  {getStatusText(record.ingestionStatus)}
+                                </Text>
+                              </XStack>
                             </XStack>
-                          )}
+                          </YStack>
+                          <Button
+                            size="$2"
+                            circular
+                            chromeless
+                            onPress={() => handleDelete(record as any)}
+                            icon={<Ionicons name="trash-outline" size={18} color="#EF4444" />}
+                          />
                         </XStack>
 
                         {/* Description / Summary */}
@@ -450,11 +595,12 @@ export function RecordsDashboardScreen() {
               elevation={8}
               pressStyle={{ scale: 0.95, backgroundColor: '#2563EB' }}
               onPress={handleUpload}
-              icon={<Ionicons name="add" size={24} color="white" />}
+              disabled={uploading}
+              icon={uploading ? <ActivityIndicator color="white" /> : <Ionicons name="add" size={24} color="white" />}
               paddingHorizontal="$5"
             >
               <Text fontSize="$4" fontWeight="600" color="white">
-                Add Record
+                {uploading ? 'Uploading...' : 'Add Record'}
               </Text>
             </Button>
           </XStack>

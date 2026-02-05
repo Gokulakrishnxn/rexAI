@@ -4,11 +4,13 @@ import type { Medication } from '../../types/medication';
 
 interface RecordsState {
   records: HealthRecord[];
-  medications: Medication[];
-  setRecords: (r: HealthRecord[]) => void;
-  setMedications: (m: Medication[]) => void;
-  addRecord: (r: HealthRecord) => void;
-  addMedication: (m: Medication) => void;
+  activeMeds: Medication[];
+  compliance: Record<string, boolean>;
+  setRecords: (records: HealthRecord[]) => void;
+  addRecord: (record: HealthRecord) => void;
+  updateRecord: (id: string, updates: Partial<HealthRecord>) => void;
+  removeRecord: (id: string) => void;
+  markTaken: (id: string) => void;
 }
 
 export const useRecordsStore = create<RecordsState>((set) => ({
@@ -20,6 +22,7 @@ export const useRecordsStore = create<RecordsState>((set) => ({
       date: '2024-01-20',
       summary: 'Normal results for all parameters.',
       doctor: 'Dr. Smith',
+      ingestionStatus: 'complete',
     },
     {
       id: '2',
@@ -28,6 +31,7 @@ export const useRecordsStore = create<RecordsState>((set) => ({
       date: '2024-01-22',
       summary: 'Take one tablet twice a day for 7 days.',
       doctor: 'Dr. Jones',
+      ingestionStatus: 'complete',
     },
     {
       id: '3',
@@ -36,11 +40,20 @@ export const useRecordsStore = create<RecordsState>((set) => ({
       date: '2024-01-25',
       summary: 'Clear lungs, no abnormalities detected.',
       doctor: 'Dr. Wilson',
+      ingestionStatus: 'complete',
     }
   ],
-  medications: [],
-  setRecords: (r) => set({ records: r }),
-  setMedications: (m) => set({ medications: m }),
-  addRecord: (r) => set((s) => ({ records: [...s.records, r] })),
-  addMedication: (m) => set((s) => ({ medications: [...s.medications, m] })),
+  activeMeds: [],
+  compliance: {},
+  setRecords: (records) => set({ records }),
+  addRecord: (record) => set((s) => ({ records: [record, ...s.records] })),
+  updateRecord: (id, updates) => set((s) => ({
+    records: s.records.map((r) => r.id === id ? { ...r, ...updates } : r)
+  })),
+  removeRecord: (id) => set((s) => ({
+    records: s.records.filter((r) => r.id !== id)
+  })),
+  markTaken: (id) => set((s) => ({
+    compliance: { ...s.compliance, [id]: !s.compliance[id] }
+  })),
 }));
