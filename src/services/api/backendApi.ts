@@ -3,13 +3,52 @@
  * Handles communication with the Node.js backend for ingestion and chat
  */
 import Constants from 'expo-constants';
+import { useAuthStore } from '../../store/useAuthStore';
+
+import { Platform } from 'react-native';
 
 const getBackendUrl = (): string => {
-    return process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+    // 1. Check environment variable
+    if (process.env.EXPO_PUBLIC_BACKEND_URL) {
+        return process.env.EXPO_PUBLIC_BACKEND_URL;
+    }
+
+    // 2. Dynamic Host URI (Critical for physical devices)
+    if (Constants.expoConfig?.hostUri) {
+        const host = Constants.expoConfig.hostUri.split(':')[0];
+        const url = `http://${host}:3001`;
+        console.log('[BackendApi] Dynamic URL:', url);
+        return url;
+    }
+
+    // 3. Fallback for local development
+    if (Platform.OS === 'android') {
+        return 'http://10.0.2.2:3001';
+    }
+
+    console.log('[BackendApi] Defaulting to localhost');
+    return 'http://localhost:3001';
+};
+
+/**
+ * Helper to get headers with Auth
+ */
+const getHeaders = async (contentType = 'application/json', authToken?: string | null) => {
+    let token = authToken;
+
+    // If no explicit token provided, try getting from store
+    if (!token) {
+        const firebaseUser = useAuthStore.getState().firebaseUser;
+        token = firebaseUser ? await firebaseUser.getIdToken() : null;
+    }
+
+    return {
+        'Content-Type': contentType,
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    };
 };
 
 export type IngestRequest = {
-    userId: string;
     fileUrl: string;
     fileName: string;
     fileType: string;
@@ -25,7 +64,6 @@ export type IngestResponse = {
 };
 
 export type ChatRequest = {
-    userId: string;
     question: string;
     sessionId?: string;
 };
@@ -66,9 +104,7 @@ export const triggerIngestion = async (request: IngestRequest): Promise<IngestRe
 
         const response = await fetch(url, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: await getHeaders(),
             body: JSON.stringify(request),
         });
 
@@ -80,12 +116,7 @@ export const triggerIngestion = async (request: IngestRequest): Promise<IngestRe
         return await response.json();
     } catch (error) {
         console.error('Ingestion error:', error);
-        return {
-            success: false,
-            documentId: '',
-            chunkCount: 0,
-            error: error instanceof Error ? error.message : 'Ingestion failed',
-        };
+        return { success: false, documentId: '', chunkCount: 0, error: 'Ingestion failed' };
     }
 };
 
@@ -96,9 +127,7 @@ export const sendChatMessage = async (request: ChatRequest): Promise<ChatRespons
     try {
         const response = await fetch(`${getBackendUrl()}/api/chat`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: await getHeaders(),
             body: JSON.stringify(request),
         });
 
@@ -110,11 +139,7 @@ export const sendChatMessage = async (request: ChatRequest): Promise<ChatRespons
         return await response.json();
     } catch (error) {
         console.error('Chat error:', error);
-        return {
-            success: false,
-            answer: '',
-            error: error instanceof Error ? error.message : 'Chat request failed',
-        };
+        return { success: false, answer: '', error: 'Chat request failed' };
     }
 };
 
@@ -130,9 +155,7 @@ export const streamChatMessage = async (
     try {
         const response = await fetch(`${getBackendUrl()}/api/chat/stream`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: await getHeaders(),
             body: JSON.stringify(request),
         });
 
@@ -164,16 +187,18 @@ export const streamChatMessage = async (
         });
     } catch (error) {
         console.error('Stream error:', error);
-        onError(error instanceof Error ? error.message : 'Stream failed');
+        onError('Stream failed');
     }
 };
 
 /**
  * List all chat sessions for a user
  */
-export const fetchSessions = async (userId: string): Promise<ChatSession[]> => {
+export const fetchSessions = async (): Promise<ChatSession[]> => {
     try {
-        const response = await fetch(`${getBackendUrl()}/api/sessions/${userId}`);
+        const response = await fetch(`${getBackendUrl()}/api/sessions`, {
+            headers: await getHeaders(),
+        });
         const data = await response.json();
         return data.success ? data.sessions : [];
     } catch (error) {
@@ -185,12 +210,12 @@ export const fetchSessions = async (userId: string): Promise<ChatSession[]> => {
 /**
  * Create a new chat session
  */
-export const createSession = async (userId: string, title?: string): Promise<ChatSession | null> => {
+export const createSession = async (title?: string): Promise<ChatSession | null> => {
     try {
         const response = await fetch(`${getBackendUrl()}/api/sessions`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId, title }),
+            headers: await getHeaders(),
+            body: JSON.stringify({ title }),
         });
         const data = await response.json();
         return data.success ? data.session : null;
@@ -205,7 +230,9 @@ export const createSession = async (userId: string, title?: string): Promise<Cha
  */
 export const fetchSessionMessages = async (sessionId: string): Promise<ChatMessage[]> => {
     try {
-        const response = await fetch(`${getBackendUrl()}/api/sessions/messages/${sessionId}`);
+        const response = await fetch(`${getBackendUrl()}/api/sessions/messages/${sessionId}`, {
+            headers: await getHeaders(),
+        });
         const data = await response.json();
         return data.success ? data.messages : [];
     } catch (error) {
@@ -216,13 +243,77 @@ export const fetchSessionMessages = async (sessionId: string): Promise<ChatMessa
 /**
  * List all documents for a user
  */
-export const fetchUserDocuments = async (userId: string): Promise<any[]> => {
+export const fetchUserDocuments = async (): Promise<any[]> => {
     try {
-        const response = await fetch(`${getBackendUrl()}/api/ingest/${userId}`);
+        const response = await fetch(`${getBackendUrl()}/api/ingest`, {
+            headers: await getHeaders(),
+        });
         const data = await response.json();
         return data.success ? data.documents : [];
     } catch (error) {
         console.error('Fetch user documents error:', error);
         return [];
+    }
+};
+/**
+ * Onboard a new user (Create/Sync profile in Supabase via Backend)
+ */
+export const onboardUser = async (profileData: {
+    name: string;
+    age?: string;
+    gender?: string;
+    blood_group?: string;
+    emergency_contact?: string;
+    role?: string;
+}, token?: string): Promise<{ success: boolean; profile?: any; error?: string }> => {
+    try {
+        const headers = await getHeaders('application/json', token);
+        const response = await fetch(`${getBackendUrl()}/api/profile/onboard`, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(profileData),
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `HTTP ${response.status}`);
+        }
+
+        return await response.json();
+    } catch (error: any) {
+        console.error('Onboarding error:', error);
+        return { success: false, error: error.message || 'Onboarding request failed' };
+    }
+};
+
+/**
+ * Fetch User Profile (Bypasses RLS by using Backend)
+ */
+export const fetchUserProfile = async (token?: string): Promise<{ success: boolean; profile?: any; error?: string }> => {
+    try {
+        console.log('[BackendApi] fetchUserProfile called. Explicit token?', !!token);
+        const headers = await getHeaders('application/json', token);
+        const url = `${getBackendUrl()}/api/profile`;
+        console.log(`[BackendApi] Fetching profile from: ${url}`);
+
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: headers,
+        });
+
+        console.log(`[BackendApi] Profile Response Status: ${response.status}`);
+
+        if (!response.ok) {
+            const text = await response.text();
+            console.error(`[BackendApi] Profile Fetch Failed: ${text}`);
+            return { success: false, error: 'Failed to fetch profile' };
+        }
+
+        const data = await response.json();
+        console.log('[BackendApi] Profile Data:', data);
+        return data;
+    } catch (error: any) {
+        console.error('Fetch profile error:', error);
+        return { success: false, error: error.message };
     }
 };

@@ -22,8 +22,9 @@ import { useRecordsStore } from '../../store/useRecordsStore';
 import { CustomMessageBubble } from '../../components/chat/CustomMessageBubble';
 import { ResponsiveContainer } from '@/components/ui/ResponsiveContainer';
 import { sendChatMessage, createSession, fetchSessions, fetchSessionMessages } from '@/services/api/backendApi';
-import { useUserStore } from '../../store/useUserStore';
+import { useAuthStore } from '../../store/useAuthStore';
 import { ActivityIndicator, Dimensions } from 'react-native';
+import { HealthScoreGraph } from '@/components/chat/HealthScoreGraph';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -37,9 +38,9 @@ export function CoachChatScreen() {
   const [mentionQuery, setMentionQuery] = useState('');
   const [showMentions, setShowMentions] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
-  const { profile } = useUserStore();
+  const { user: profile } = useAuthStore();
   const { updateChat } = useChatStore();
-  const USER_ID = profile?.id || '123e4567-e89b-12d3-a456-426614174000';
+  const USER_ID = profile?.id;
 
   // Get current active chat
   const currentChat = useMemo(() => {
@@ -52,7 +53,7 @@ export function CoachChatScreen() {
   React.useEffect(() => {
     const loadSessions = async () => {
       try {
-        const sessions = await fetchSessions(USER_ID);
+        const sessions = await fetchSessions();
         if (sessions && sessions.length > 0) {
           const formattedSessions: ChatSession[] = sessions.map((s: any) => ({
             id: s.id,
@@ -104,20 +105,6 @@ export function CoachChatScreen() {
     setOpenHistory(false);
   };
 
-  // Convert store messages to GiftedChat format
-  const giftedMessages: IMessage[] = useMemo(() => {
-    if (!currentChat) return [];
-    return [...currentChat.messages].reverse().map((msg) => ({
-      _id: msg.id,
-      text: msg.text,
-      createdAt: msg.createdAt,
-      user: {
-        _id: msg.userId,
-        name: msg.userId === 'user' ? 'You' : 'Rex.ai',
-        avatar: msg.userId === 'user' ? undefined : '🦖',
-      },
-    }));
-  }, [currentChat?.messages]);
 
   const onSend = useCallback(async (newMessages: IMessage[] = []) => {
     if (newMessages.length > 0 && currentChatId && currentChat) {
@@ -138,7 +125,7 @@ export function CoachChatScreen() {
 
         // Create backend session if it doesn't exist
         if (!backendSessionId) {
-          const session = await createSession(USER_ID, msg.text.substring(0, 30));
+          const session = await createSession(msg.text.substring(0, 30));
           if (session) {
             backendSessionId = session.id;
             updateChat(currentChatId, { backendSessionId });
@@ -147,7 +134,6 @@ export function CoachChatScreen() {
 
         // Send to backend RAG
         const chatResponse = await sendChatMessage({
-          userId: USER_ID,
           question: msg.text,
           sessionId: backendSessionId
         });
@@ -360,6 +346,102 @@ export function CoachChatScreen() {
     );
   };
 
+  const renderCustomView = (props: any) => {
+    const { currentMessage } = props;
+    if (!currentMessage?.text) return null;
+
+    const text = currentMessage.text;
+
+    // Debug log to check if JSON is reaching the frontend
+    if (text.includes('health_score') || text.includes('json')) {
+      console.log('[CoachChat] Checking message for graph JSON...');
+    }
+
+    // Parse Logic:
+    // 1. Try to find a fenced code block first (Most reliable for nested JSON)
+    let jsonStr = '';
+    const fencedMatch = text.match(/```json\s*(\{[\s\S]*?\})\s*```/);
+
+    if (fencedMatch && fencedMatch[1]) {
+      jsonStr = fencedMatch[1];
+    } else {
+      // 2. Fallback: Look for the specific signature but capture cleanly
+      // We can't trust simple regex for nested {}, so we might need to assume it's at the end
+      // or try a balanced approach. For now, let's look for the start and the LAST }
+      const startIdx = text.indexOf('{"type": "health_score"');
+      const endIdx = text.lastIndexOf('}');
+      if (startIdx !== -1 && endIdx > startIdx) {
+        jsonStr = text.substring(startIdx, endIdx + 1);
+      }
+    }
+
+    if (jsonStr) {
+      try {
+        console.log('[CoachChat] Attempting to parse extracted JSON:', jsonStr.substring(0, 50) + '...');
+        const data = JSON.parse(jsonStr);
+
+
+        return (
+          <YStack padding="$2" width={SCREEN_WIDTH * 0.9} alignSelf="center">
+            <HealthScoreGraph data={data.data} />
+          </YStack>
+        );
+      } catch (e) {
+        console.warn('Failed to parse health score JSON (CustomView)', e);
+      }
+    }
+    return null;
+  };
+
+  // Helper to clean text for display (removes the JSON block)
+  const formatMessageText = (text: string) => {
+    // 1. Remove fenced block (robust)
+    let clean = text.replace(/```json\s*(\{[\s\S]*?\})\s*```/g, '');
+
+    // 2. Remove raw JSON block if it exists and wasn't fenced
+    // Use the same fallback logic as renderCustomView to ensure we cut it all out
+    if (clean.includes('"type": "health_score"')) {
+      const startIdx = clean.indexOf('{"type": "health_score"');
+      const endIdx = clean.lastIndexOf('}');
+      if (startIdx !== -1 && endIdx > startIdx) {
+        clean = clean.substring(0, startIdx) + clean.substring(endIdx + 1);
+      }
+    }
+    return clean.trim();
+  };
+
+  // Convert store messages to GiftedChat format with CLEANED text
+  const giftedMessages: IMessage[] = useMemo(() => {
+    if (!currentChat) return [];
+    return [...currentChat.messages].reverse().map((msg) => {
+      // Check if original text has JSON to preserve it for CustomView, 
+      // but we want to hide it from the text bubble.
+      // GiftedChat passes the *entire* message object to renderCustomView.
+      return {
+        _id: msg.id,
+        text: msg.text, // Keep full text here so CustomView can find it? 
+        // Text bubble displays this. We need to split or handle text formatting.
+        createdAt: msg.createdAt,
+        user: {
+          _id: msg.userId,
+          name: msg.userId === 'user' ? 'You' : 'Rex.ai',
+          avatar: msg.userId === 'user' ? undefined : '🦖',
+        },
+      };
+    });
+  }, [currentChat?.messages]);
+
+  // Custom MessageText component to hide JSON
+  const renderMessageText = (props: any) => {
+    const { currentMessage } = props;
+    const cleanText = formatMessageText(currentMessage.text);
+    if (!cleanText) return null; // If text was only JSON
+
+    // Use default MessageText but with cleaned text
+    const { MessageText } = require('react-native-gifted-chat');
+    return <MessageText {...props} currentMessage={{ ...currentMessage, text: cleanText }} />;
+  };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#000000' }}>
       <KeyboardAvoidingView
@@ -434,6 +516,8 @@ export function CoachChatScreen() {
                 renderBubble={renderBubble}
                 renderInputToolbar={renderInputToolbar}
                 renderSend={renderSend}
+                renderCustomView={renderCustomView}
+                renderMessageText={renderMessageText}
                 textInputProps={{
                   placeholder: "Ask a question...",
                   onChangeText: onInputTextChanged,

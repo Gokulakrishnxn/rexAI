@@ -4,11 +4,19 @@
 
 import type { QRData } from '../store/useQRStore';
 
-export function buildEmergencyJson(profile: { name: string; bloodType?: string; allergies?: string[] }): string {
+export type QRProfile = {
+  name?: string;
+  blood_group?: string;
+  allergies?: string[];
+  emergency_contact?: string;
+};
+
+export function buildEmergencyJson(profile: QRProfile): string {
   return JSON.stringify({
-    name: profile.name,
-    bloodType: profile.bloodType,
+    name: profile.name || 'Anonymous User',
+    bloodType: profile.blood_group,
     allergies: profile.allergies ?? [],
+    emergencyContact: profile.emergency_contact,
     updatedAt: Date.now(),
   });
 }
@@ -18,7 +26,7 @@ export function buildFullUrl(emergencyJson: string): string {
   return `${base}/e?q=${encodeURIComponent(emergencyJson)}`;
 }
 
-export function generateQRData(profile: { name: string; bloodType?: string; allergies?: string[] }): QRData {
+export function generateQRData(profile: QRProfile): QRData {
   const emergencyJson = buildEmergencyJson(profile);
   return {
     emergencyJson,

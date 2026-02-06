@@ -1,21 +1,16 @@
-/**
- * Chat Route
- * Handles RAG-based chat: Embed query → Retrieve → Compress → Generate
- */
-
-import { Request, Response, Router } from 'express';
+import { Response, Router } from 'express';
 import { generateChatResponse, streamChatResponse } from '../services/chatgpt.js';
 import { countTokens } from '../services/chunker.js';
 import { embedText } from '../services/embeddings.js';
 import { searchSimilarChunks } from '../services/vectorStore.js';
 import { supabase } from '../utils/supabase.js';
+import { verifyFirebaseToken, FirebaseRequest } from '../middleware/firebase_auth.js';
 
 const router = Router();
 
 interface ChatRequest {
-    userId: string;
     question: string;
-    sessionId?: string; // Changed from conversationId to sessionId for consistency
+    sessionId?: string;
 }
 
 /**
@@ -25,39 +20,26 @@ function compressContext(
     chunks: Array<{ content: string; document_id: string; similarity: number }>,
     maxTokens: number = 1200
 ): string {
-    // Group by document
     const byDocument = new Map<string, typeof chunks>();
     for (const chunk of chunks) {
         const existing = byDocument.get(chunk.document_id) || [];
         existing.push(chunk);
         byDocument.set(chunk.document_id, existing);
     }
-
-    // Pick top 2-3 chunks per document
     const selectedChunks: typeof chunks = [];
     for (const [docId, docChunks] of byDocument) {
-        // Sort by similarity and take top 3
-        const topChunks = docChunks
-            .sort((a, b) => b.similarity - a.similarity)
-            .slice(0, 3);
+        const topChunks = docChunks.sort((a, b) => b.similarity - a.similarity).slice(0, 3);
         selectedChunks.push(...topChunks);
     }
-
-    // Sort all selected by similarity
     selectedChunks.sort((a, b) => b.similarity - a.similarity);
-
-    // Build context respecting token limit
     let context = '';
     let currentTokens = 0;
-
     for (const chunk of selectedChunks) {
         const chunkTokens = countTokens(chunk.content);
         if (currentTokens + chunkTokens > maxTokens) break;
-
         context += chunk.content + '\n\n---\n\n';
         currentTokens += chunkTokens;
     }
-
     return context.trim();
 }
 
@@ -65,21 +47,15 @@ function compressContext(
  * POST /api/chat
  * Process a chat message with RAG
  */
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', verifyFirebaseToken as any, async (req: FirebaseRequest, res: Response) => {
     try {
-        const { userId, question, sessionId } = req.body as ChatRequest;
+        const { question, sessionId } = req.body as ChatRequest;
+        const userId = req.user!.id;
 
-        // Validate input
-        if (!userId || !question) {
-            return res.status(400).json({
-                success: false,
-                error: 'Missing required fields: userId, question',
-            });
+        if (!question) {
+            return res.status(400).json({ success: false, error: 'Missing question' });
         }
 
-        console.log(`Chat query from ${userId}: ${question.substring(0, 50)}...`);
-
-        // Step 0: Save user message if sessionId is provided
         if (sessionId) {
             await supabase.from('chat_messages').insert([{
                 session_id: sessionId,
@@ -88,7 +64,6 @@ router.post('/', async (req: Request, res: Response) => {
             }]);
         }
 
-        // Step 1: Fetch recent history for context
         let history: Array<{ role: 'user' | 'assistant'; content: string }> = [];
         if (sessionId) {
             const { data } = await supabase
@@ -100,36 +75,45 @@ router.post('/', async (req: Request, res: Response) => {
             history = (data || []).reverse() as Array<{ role: 'user' | 'assistant'; content: string }>;
         }
 
-        // Step 2: Embed the question
         const queryEmbedding = await embedText(question);
-
-        // 3. Search similar chunks
+        console.log(`[RAG] Embedding generated. Searching for chunks...`);
         const similarChunks = await searchSimilarChunks(userId, queryEmbedding, 6, 0.15);
-        console.log(`Found ${similarChunks.length} potentially relevant chunks`);
+        console.log(`[RAG] Found ${similarChunks.length} relevant chunks similar to query.`);
 
-        // 4. Generate response
-        let answer;
-        const context = similarChunks.length > 0
-            ? compressContext(similarChunks, 1500)
-            : "[NO SOURCE DATA FOUND FOR THIS QUERY]";
+        // Fetch user profile for context
+        const { data: profile } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', userId)
+            .single();
 
-        try {
-            // Pass history to LLM
-            answer = await generateChatResponse(question, context, history);
-            console.log('ChatGPT response generated (Flexible)');
-        } catch (err) {
-            console.error('ChatGPT failed, falling back to Gemini:', err);
-            try {
-                const { generateGeminiChatResponse } = await import('../services/gemini.js');
-                answer = await generateGeminiChatResponse(question, context, history);
-                console.log('Gemini response generated (Fallback - Flexible)');
-            } catch (geminiErr) {
-                console.error('Gemini also failed:', geminiErr);
-                answer = "I apologize, but I'm currently unable to access my medical knowledge base. Please try again in a few moments.";
-            }
+        let profileContext = "";
+        if (profile) {
+            profileContext = `User Profile:
+- Name: ${profile.name || 'Unknown'}
+- Age: ${profile.age || 'Not shared'}
+- Gender: ${profile.gender || 'Not shared'}
+- Blood Group: ${profile.blood_group || 'Not shared'}
+- Allergies: ${profile.allergies?.join(', ') || 'None reported'}
+\n`;
         }
 
-        // Step 5: Save assistant message if sessionId is provided
+        const ragContext = similarChunks.length > 0 ? compressContext(similarChunks, 1500) : "[NO RELEVANT DOCUMENTS FOUND]";
+        console.log(`[RAG] Constructed context with ${ragContext.length} chars.`);
+
+        const context = (profileContext + ragContext).trim();
+
+        let answer;
+        try {
+            answer = await generateChatResponse(question, context, history);
+        } catch (err) {
+            console.error('ChatGPT failed, falling back to Gemini:', err);
+            const { generateGeminiChatResponse } = await import('../services/gemini.js');
+            answer = await generateGeminiChatResponse(question, context, history);
+        }
+
+        // (Debug injection removed)
+
         if (sessionId) {
             await supabase.from('chat_messages').insert([{
                 session_id: sessionId,
@@ -144,40 +128,25 @@ router.post('/', async (req: Request, res: Response) => {
             sources: similarChunks.map(c => ({
                 id: c.document_id,
                 text: c.content,
-                metadata: (c as any).metadata || {},
                 similarity: c.similarity
             })),
         });
 
     } catch (error) {
         console.error('Chat error:', error);
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : 'Chat failed',
-        });
+        res.status(500).json({ success: false, error: 'Chat failed' });
     }
 });
 
-/**
- * POST /api/chat/stream
- * Stream a chat response
- */
-router.post('/stream', async (req: Request, res: Response) => {
+router.post('/stream', verifyFirebaseToken as any, async (req: FirebaseRequest, res: Response) => {
     try {
-        const { userId, question, sessionId } = req.body as ChatRequest;
+        const { question, sessionId } = req.body as ChatRequest;
+        const userId = req.user!.id;
 
-        if (!userId || !question) {
-            return res.status(400).json({
-                success: false,
-                error: 'Missing required fields: userId, question',
-            });
-        }
+        if (!question) return res.status(400).json({ success: false });
 
-        // Set headers for streaming
         res.setHeader('Content-Type', 'text/plain');
-        res.setHeader('Transfer-Encoding', 'chunked');
 
-        // Step 0: Save user message if sessionId is provided
         if (sessionId) {
             await supabase.from('chat_messages').insert([{
                 session_id: sessionId,
@@ -186,7 +155,6 @@ router.post('/stream', async (req: Request, res: Response) => {
             }]);
         }
 
-        // Step 1: Fetch recent history for context
         let history: Array<{ role: 'user' | 'assistant'; content: string }> = [];
         if (sessionId) {
             const { data } = await supabase
@@ -198,43 +166,35 @@ router.post('/stream', async (req: Request, res: Response) => {
             history = (data || []).reverse() as Array<{ role: 'user' | 'assistant'; content: string }>;
         }
 
-        // Step 2: Embed query
         const queryEmbedding = await embedText(question);
-
-        // 3. Search similar chunks
         const similarChunks = await searchSimilarChunks(userId, queryEmbedding, 6, 0.15);
-        console.log(`Found ${similarChunks.length} potentially relevant chunks for stream`);
 
-        // 4. Compress & stream with fallback
-        const context = similarChunks.length > 0
-            ? compressContext(similarChunks, 1500)
-            : "[NO SOURCE DATA FOUND FOR THIS QUERY]";
+        // Fetch user profile for context
+        const { data: profile } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', userId)
+            .single();
 
-        let fullResonse = "";
-
-        try {
-            await streamChatResponse(question, context, (chunk) => {
-                res.write(chunk);
-                fullResonse += chunk;
-            }, history);
-            console.log('ChatGPT stream completed (Flexible)');
-        } catch (err) {
-            console.error('ChatGPT stream failed, falling back to Gemini:', err);
-            try {
-                // gemini.ts is already imported or can be imported
-                const { streamGeminiChatResponse } = await import('../services/gemini.js');
-                await streamGeminiChatResponse(question, context, (chunk) => {
-                    res.write(chunk);
-                    fullResonse += chunk;
-                }, history);
-                console.log('Gemini stream completed (Fallback - Flexible)');
-            } catch (geminiErr) {
-                console.error('Gemini stream also failed:', geminiErr);
-                res.write("\n\n[System: Backup AI service also failed. Please check your account credits or API configuration.]");
-            }
+        let profileContext = "";
+        if (profile) {
+            profileContext = `User Profile:
+- Name: ${profile.name || 'Unknown'}
+- Age: ${profile.age || 'Not shared'}
+- Gender: ${profile.gender || 'Not shared'}
+- Blood Group: ${profile.blood_group || 'Not shared'}
+- Allergies: ${profile.allergies?.join(', ') || 'None reported'}
+\n`;
         }
 
-        // Step 5: Save assistant message if sessionId is provided
+        const context = (profileContext + (similarChunks.length > 0 ? compressContext(similarChunks, 1500) : "[NO RELEVANT DOCUMENTS]")).trim();
+
+        let fullResonse = "";
+        await streamChatResponse(question, context, (chunk) => {
+            res.write(chunk);
+            fullResonse += chunk;
+        }, history);
+
         if (sessionId && fullResonse) {
             await supabase.from('chat_messages').insert([{
                 session_id: sessionId,
@@ -242,12 +202,9 @@ router.post('/stream', async (req: Request, res: Response) => {
                 content: fullResonse
             }]);
         }
-
         res.end();
-
     } catch (error) {
-        console.error('Stream error:', error);
-        res.status(500).end('Error generating response');
+        res.status(500).end();
     }
 });
 

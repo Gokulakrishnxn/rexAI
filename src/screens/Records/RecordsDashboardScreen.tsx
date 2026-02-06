@@ -19,7 +19,7 @@ import { ResponsiveContainer } from '@/components/ui/ResponsiveContainer';
 import { Ionicons } from '@expo/vector-icons';
 import { useRecordsStore } from '../../store/useRecordsStore';
 import { useMedAgentStore } from '../../store/useMedAgentStore';
-import { useUserStore } from '../../store/useUserStore';
+import { useAuthStore } from '../../store/useAuthStore';
 import type { RecordsStackParamList } from '../../navigation/stacks/RecordsStack';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { uploadToStorage, deleteFromStorage } from '@/services/supabase';
@@ -75,20 +75,19 @@ function PillBadge({ label, variant = 'default' }: { label: string; variant?: 'd
 
 export function RecordsDashboardScreen() {
   const navigation = useNavigation<NavigationProp>();
-  const { records } = useRecordsStore();
+  const { records, setRecords, addRecord, updateRecord, removeRecord } = useRecordsStore();
   const { activeMeds, compliance } = useMedAgentStore();
-  const { profile } = useUserStore();
-  const { setRecords, addRecord } = useRecordsStore();
+  const { user: profile } = useAuthStore();
   const [activeTab, setActiveTab] = useState('timeline');
   const [loading, setLoading] = useState(true);
 
   const [uploading, setUploading] = useState(false);
-  const USER_ID = profile?.id || '123e4567-e89b-12d3-a456-426614174000';
+  const USER_ID = profile?.id;
 
   React.useEffect(() => {
     const loadRecords = async () => {
       try {
-        const docs = await fetchUserDocuments(USER_ID);
+        const docs = await fetchUserDocuments();
         if (docs && docs.length > 0) {
           const formattedRecords: HealthRecord[] = docs.map((doc: any) => ({
             id: doc.id,
@@ -134,9 +133,11 @@ export function RecordsDashboardScreen() {
     }
   };
 
-  const { updateRecord, removeRecord } = useRecordsStore();
-
   const handleUpload = async () => {
+    if (!USER_ID) {
+      Alert.alert('Error', 'Please log in to upload documents');
+      return;
+    }
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['application/pdf', 'image/*'],
@@ -181,7 +182,6 @@ export function RecordsDashboardScreen() {
 
           // Step 2: Trigger ingestion
           const ingestResult = await triggerIngestion({
-            userId: USER_ID,
             fileUrl: url,
             fileName: file.name,
             fileType: file.mimeType || 'application/octet-stream',
@@ -242,21 +242,13 @@ export function RecordsDashboardScreen() {
     );
   };
 
-  // Mock data for demo
-  const conditions = ['Diabetes Type 2', 'Hypertension'];
-  const allergies = profile?.allergies || ['Penicillin', 'Peanuts'];
-  const vaccinations = ['COVID-19 (2023)', 'Flu (2024)'];
+  // No mock data - use empty arrays or live data
+  const conditions = [];
+  const allergies = profile?.allergies || [];
+  const vaccinations = [];
 
-  const timelineRecords: HealthRecord[] = records.length > 0 ? records : [
-    { id: '1', type: 'lab', title: 'Complete Blood Count', date: '2024-01-15', doctor: 'Dr. Smith', hospital: 'City Hospital', ingestionStatus: 'complete' },
-    { id: '2', type: 'prescription', title: 'Metformin 500mg', date: '2024-01-10', doctor: 'Dr. Johnson', ingestionStatus: 'complete' },
-    { id: '3', type: 'imaging', title: 'Chest X-Ray', date: '2024-01-05', hospital: 'Medical Center', ingestionStatus: 'complete' },
-  ];
-
-  const prescriptions = activeMeds.length > 0 ? activeMeds : [
-    { id: '1', name: 'Metformin', dosage: '500mg', frequency: 'Twice daily' },
-    { id: '2', name: 'Aspirin', dosage: '81mg', frequency: 'Once daily' },
-  ];
+  const timelineRecords = records;
+  const prescriptions = activeMeds;
 
   const getTypeIcon = (type: string) => {
     switch (type) {
@@ -366,7 +358,7 @@ export function RecordsDashboardScreen() {
                   <YStack alignItems="center" gap="$2">
                     <XStack alignItems="center" gap="$2">
                       <Ionicons name="folder-open" size={18} color="#E0E0E0" />
-                      <Text color="#E0E0E0" fontSize="$6" fontWeight="700">30</Text>
+                      <Text color="#E0E0E0" fontSize="$6" fontWeight="700">{records.length}</Text>
                     </XStack>
                     <Text color="#8E8E93" fontSize="$2" fontWeight="600">Total</Text>
                   </YStack>
@@ -374,17 +366,21 @@ export function RecordsDashboardScreen() {
                   <YStack alignItems="center" gap="$2">
                     <XStack alignItems="center" gap="$2">
                       <Ionicons name="checkmark-circle" size={18} color="#4ADE80" />
-                      <Text color="#4ADE80" fontSize="$6" fontWeight="700">24</Text>
+                      <Text color="#4ADE80" fontSize="$6" fontWeight="700">
+                        {records.filter(r => r.type === 'lab').length}
+                      </Text>
                     </XStack>
-                    <Text color="#4ADE80" fontSize="$2" fontWeight="600">Unique</Text>
+                    <Text color="#4ADE80" fontSize="$2" fontWeight="600">Labs</Text>
                   </YStack>
 
                   <YStack alignItems="center" gap="$2">
                     <XStack alignItems="center" gap="$2">
                       <Ionicons name="copy" size={18} color="#F59E0B" />
-                      <Text color="#F59E0B" fontSize="$6" fontWeight="700">6</Text>
+                      <Text color="#F59E0B" fontSize="$6" fontWeight="700">
+                        {records.filter(r => r.type === 'prescription').length}
+                      </Text>
                     </XStack>
-                    <Text color="#F59E0B" fontSize="$2" fontWeight="600">Duplicates</Text>
+                    <Text color="#F59E0B" fontSize="$2" fontWeight="600">Meds</Text>
                   </YStack>
                 </XStack>
               </Card>
@@ -447,9 +443,7 @@ export function RecordsDashboardScreen() {
 
                         {/* Description / Summary */}
                         <Text fontSize="$3" color="#9CA3AF" lineHeight={20} numberOfLines={2}>
-                          {record.type === 'lab'
-                            ? "Hemoglobin: 14.5 g/dL (Normal), WBC: 7.2 x 10³/µL (Normal), Platelets: 250 x 10³/µL (Normal)"
-                            : "Prescription for daily use. Take with food. Monitor blood pressure weekly."}
+                          {record.summary || "No summary available for this record."}
                         </Text>
 
                         {/* Metadata: Doctor + Date */}
@@ -468,14 +462,16 @@ export function RecordsDashboardScreen() {
                           </XStack>
                         </XStack>
 
-                        {/* Tags */}
-                        <XStack gap="$2" flexWrap="wrap" marginTop="$1">
-                          {['Blood Test', 'CBC', 'Hematology'].map((tag) => (
-                            <XStack key={tag} backgroundColor="#374151" paddingHorizontal="$3" paddingVertical="$1.5" borderRadius="$4">
-                              <Text fontSize="$2" color="#D1D5DB" fontWeight="500">{tag}</Text>
-                            </XStack>
-                          ))}
-                        </XStack>
+                        {/* Tags - Hide if none */}
+                        {record.tags && record.tags.length > 0 && (
+                          <XStack gap="$2" flexWrap="wrap" marginTop="$1">
+                            {record.tags.map((tag) => (
+                              <XStack key={tag} backgroundColor="#374151" paddingHorizontal="$3" paddingVertical="$1.5" borderRadius="$4">
+                                <Text fontSize="$2" color="#D1D5DB" fontWeight="500">{tag}</Text>
+                              </XStack>
+                            ))}
+                          </XStack>
+                        )}
                       </YStack>
                     </Card>
                   ))}
@@ -557,15 +553,9 @@ export function RecordsDashboardScreen() {
                           </XStack>
                           <XStack gap="$4">
                             <YStack flex={1}>
-                              <Text fontSize="$2" color="$color10">Glucose</Text>
-                              <Text fontSize="$4" fontWeight="700" color="$color">
-                                95 mg/dL
-                              </Text>
-                            </YStack>
-                            <YStack flex={1}>
-                              <Text fontSize="$2" color="$color10">HbA1c</Text>
-                              <Text fontSize="$4" fontWeight="700" color="$green10">
-                                6.2%
+                              <Text fontSize="$2" color="$color10">Recent Analysis</Text>
+                              <Text fontSize="$4" fontWeight="700" color="$color" numberOfLines={1}>
+                                {record.summary || 'Normal results'}
                               </Text>
                             </YStack>
                           </XStack>

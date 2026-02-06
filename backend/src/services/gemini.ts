@@ -25,11 +25,10 @@ const ai = new GoogleGenAI({
  * Falling back down to 1.5-flash ensures maximal availability.
  */
 const MODEL_PRIORITY = [
-    // 'gemini-3-pro-preview',
-    'gemini-3-flash-preview',
+    'gemini-1.5-flash', // Most stable Free Tier options first
     'gemini-2.0-flash',
     'gemini-1.5-pro',
-    'gemini-1.5-flash'
+    'gemini-3-flash-preview',
 ];
 
 /**
@@ -43,18 +42,24 @@ async function executeWithFallback<T>(
 
     for (const modelName of MODEL_PRIORITY) {
         try {
+            console.log(`[Gemini] Attempting with model: ${modelName}`);
             return await operation(modelName);
         } catch (error: any) {
             lastError = error;
             const message = error.message || String(error);
             const isQuotaError = message.includes('429') || message.includes('RESOURCE_EXHAUSTED');
             const isNotFoundError = message.includes('404') || message.includes('not found');
+            const isServerOverload = message.includes('503') || message.includes('overloaded') || message.includes('UNAVAILABLE');
 
-            if (isQuotaError || isNotFoundError) {
-                console.warn(`Gemini model ${modelName} failed (${isQuotaError ? 'Quota' : 'Not Found'}). Trying next model...`);
+            console.warn(`[Gemini] Model ${modelName} failed. Error: ${message.substring(0, 100)}...`);
+
+            if (isQuotaError || isNotFoundError || isServerOverload) {
+                console.warn(`[Gemini] Retrying with next model...`);
+                // Add a small delay for overload errors
+                if (isServerOverload) await new Promise(resolve => setTimeout(resolve, 1000));
                 continue;
             }
-            // If it's another type of error, throw it immediately
+            // If it's another type of error (e.g. Invalid Key 400), throw it immediately
             throw error;
         }
     }
@@ -199,4 +204,48 @@ ${question}`;
             }
         }
     });
+}
+
+/**
+ * Extract text from a PDF using Gemini Flash (Multimodal OCR)
+ * Use this when standard PDF parsing fails (scanned docs)
+ */
+export async function extractTextFromPdfWithGemini(pdfBuffer: Buffer): Promise<string> {
+    const modelName = 'gemini-2.0-flash';
+    console.log(`[Gemini OCR] Starting PDF extraction with ${modelName}...`);
+
+    try {
+        // Convert buffer to base64
+        const data = pdfBuffer.toString('base64');
+
+        const result = await ai.models.generateContent({
+            model: modelName,
+            contents: [
+                {
+                    role: 'user',
+                    parts: [
+                        { text: "Extract ALL text from this medical document preserving the layout structure. Do not summarize. Just allow me to copy-paste the text." },
+                        {
+                            inlineData: {
+                                mimeType: 'application/pdf',
+                                data
+                            }
+                        }
+                    ]
+                }
+            ],
+            config: {
+                maxOutputTokens: 8192,
+                temperature: 0.1,
+            }
+        });
+
+        const text = result.text;
+        console.log(`[Gemini OCR] Success! Extracted ${text?.length || 0} characters.`);
+        return text || '';
+
+    } catch (error: any) {
+        console.error('[Gemini OCR] Failed:', error.message);
+        throw error;
+    }
 }

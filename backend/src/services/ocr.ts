@@ -9,26 +9,50 @@ const { PDFParse } = require('pdf-parse');
 /**
  * Extract text from a dictionary-based PDF buffer
  */
+// Import Gemini OCR helper
+import { extractTextFromPdfWithGemini } from './gemini.js';
+
+/**
+ * Extract text from a dictionary-based PDF buffer
+ * Fallback to Gemini OCR for scanned documents
+ */
 export async function extractTextFromPdf(pdfBuffer: Buffer): Promise<string> {
     console.log('Starting PDF text extraction...');
+    let text = '';
 
+    // 1. Try standard extraction first (fast)
     try {
         const parser = new PDFParse({ data: pdfBuffer });
         const data = await parser.getText();
+        text = normalizeText(data.text);
 
         console.log(`PDF Extraction Raw Text Length: ${data.text.length}`);
-        console.log(`PDF Extraction Raw Text Sample: "${data.text.substring(0, 500).replace(/\n/g, '\\n')}"`);
-
-        const normalized = normalizeText(data.text);
-        const pageCount = data.numpages || 0;
-
-        console.log(`PDF Extraction: ${pageCount} pages, ${normalized.length} normalized characters`);
-
-        return normalized;
-    } catch (error) {
-        console.error('PDF extraction failed:', error);
-        throw new Error(`PDF parsing failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } catch (e) {
+        console.warn('Standard PDF parsing failed, proceeding to Gemini Fallback.');
     }
+
+    // 2. heuristic Quality Check: Is it likely garbage/scanned?
+    // - Length < 50 chars?
+    // - High density of unknown symbols vs letters? (Simple check: if < 40% alphanumeric)
+    // - or just "Empty"
+    const cleanChars = text.replace(/[^a-zA-Z0-9\s]/g, '').length;
+    const totalChars = text.length;
+    const isQualityPoor = totalChars < 50 || (cleanChars / totalChars < 0.5) || text.includes('AHEEE') || text.includes('');
+
+    if (isQualityPoor) {
+        console.log('[OCR] Standard PDF text quality is poor (likely scanned). Switching to Gemini OCR...');
+        try {
+            const ocrText = await extractTextFromPdfWithGemini(pdfBuffer);
+            if (ocrText && ocrText.length > text.length) {
+                return normalizeText(ocrText);
+            }
+        } catch (geminiError) {
+            console.error('Gemini OCR Fallback failed:', geminiError);
+            // Return original poor text if fallback fails
+        }
+    }
+
+    return text;
 }
 
 /**

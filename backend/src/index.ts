@@ -9,6 +9,7 @@ import express from 'express';
 import chatRouter from './routes/chat.js';
 import ingestRouter from './routes/ingest.js';
 import sessionsRouter from './routes/sessions.js';
+import profileRouter from './routes/profile.js';
 import { initEmbeddings } from './services/embeddings.js';
 
 // Load environment variables
@@ -30,6 +31,7 @@ app.get('/health', (req, res) => {
 app.use('/api/ingest', ingestRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/sessions', sessionsRouter);
+app.use('/api/profile', profileRouter);
 
 // Error handling
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -49,13 +51,23 @@ async function start() {
         console.log('Server will continue, embeddings will load on first use');
     }
 
-    app.listen(PORT, () => {
-        console.log(`🚀 Rex Healthify Backend running on http://localhost:${PORT}`);
-        console.log(`   (For Android Emulator use: http://10.0.2.2:${PORT})`);
-        console.log(`   Health: http://localhost:${PORT}/health`);
-        console.log(`   Ingest:   POST http://localhost:${PORT}/api/ingest`);
-        console.log(`   Chat:     POST http://localhost:${PORT}/api/chat`);
-        console.log(`   Sessions: GET  http://localhost:${PORT}/api/sessions/:userId`);
+    app.listen(Number(PORT), '0.0.0.0', () => {
+        console.log(`🚀 Rex Healthify Backend running on port ${PORT}`);
+        console.log(`   Local:   http://localhost:${PORT}`);
+
+        // Log LAN IP for physical device connection
+        const { networkInterfaces } = require('os');
+        const nets = networkInterfaces();
+        for (const name of Object.keys(nets)) {
+            for (const net of nets[name]) {
+                if (net.family === 'IPv4' && !net.internal) {
+                    console.log(`   Network: http://${net.address}:${PORT} (Use this for physical device)`);
+                }
+            }
+        }
+
+        console.log(`   Health:  http://localhost:${PORT}/health`);
+        console.log(`   Profile: POST http://localhost:${PORT}/api/profile/onboard`);
     });
 }
 

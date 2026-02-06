@@ -19,9 +19,10 @@ import { AlertCircle, CheckCircle2, Info, ArrowRight, Pill } from 'lucide-react-
 import * as Haptics from 'expo-haptics';
 import Animated from 'react-native-reanimated';
 import { useEntranceAnimation } from '../../hooks/useEntranceAnimation';
-import { useUserStore } from '../../store/useUserStore';
+import { useAuthStore } from '../../store/useAuthStore';
 import { useMedAgentStore } from '../../store/useMedAgentStore';
 import { useQRStore } from '../../store/useQRStore';
+import { supabase } from '../../services/supabase';
 import { generateQRData } from '../../services/qrService';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 
@@ -35,25 +36,60 @@ interface ActivityItem {
 
 export function HomeDashboardScreen() {
   const navigation = useNavigation<NavigationProp>();
-  const { profile, setProfile } = useUserStore();
-  const { activeMeds, compliance, markTaken } = useMedAgentStore();
+  const { user: profile } = useAuthStore();
+  const { activeMeds, compliance, markTaken, fetchMedications } = useMedAgentStore();
   const { currentQR, setCurrentQR } = useQRStore();
+  const [activities, setActivities] = React.useState<ActivityItem[]>([]);
+  const [loadingActivities, setLoadingActivities] = React.useState(false);
 
   const { width: windowWidth } = Dimensions.get('window');
   const insightCardWidth = windowWidth * 0.8;
 
-  // Initialize mock user data if none exists (for demo)
+  // Fetch dynamic data
   React.useEffect(() => {
-    if (!profile) {
-      setProfile({
-        id: '123e4567-e89b-12d3-a456-426614174000',
-        name: 'Alex',
-        bloodType: 'O+',
-        allergies: ['Penicillin', 'Peanuts'],
-        emergencyContact: '+1 (555) 123-4567',
-      });
+    if (profile?.id) {
+      fetchMedications(profile.id);
+      fetchActivities();
     }
-  }, [profile, setProfile]);
+  }, [profile?.id]);
+
+  const fetchActivities = async () => {
+    if (!profile?.id) return;
+    setLoadingActivities(true);
+    try {
+      const { data, error } = await supabase
+        .from('activity_logs')
+        .select('*')
+        .eq('user_id', profile.id)
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (error) throw error;
+
+      const formatted = data.map(item => ({
+        id: item.id,
+        time: formatTimeAgo(new Date(item.created_at)),
+        description: item.description
+      }));
+      setActivities(formatted);
+    } catch (error) {
+      console.error('Error fetching activities:', error);
+    } finally {
+      setLoadingActivities(false);
+    }
+  };
+
+  const formatTimeAgo = (date: Date) => {
+    const now = new Date();
+    const diff = now.getTime() - date.getTime();
+    const mins = Math.floor(diff / 60000);
+    const hours = Math.floor(mins / 60);
+    const days = Math.floor(hours / 24);
+
+    if (mins < 60) return `${mins}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    return `${days}d ago`;
+  };
 
   // Generate greeting based on time
   const greeting = useMemo(() => {
@@ -71,44 +107,17 @@ export function HomeDashboardScreen() {
   }, [profile, currentQR?.fullUrl, setCurrentQR]);
 
 
-  // Today's medications (mock data if none)
+  // Today's medications (Filtered by time of day or just displaying all active)
   const todaysMeds = useMemo(() => {
-    if (activeMeds.length > 0) {
-      return activeMeds.slice(0, 4).map((med) => ({
-        ...med,
-        time: 'Morning',
-        taken: compliance[med.id] || false,
-      }));
-    }
-    return [
-      { id: '1', name: 'Metformin', dosage: '500mg', frequency: 'Twice daily', time: 'Morning', taken: false },
-      { id: '2', name: 'Aspirin', dosage: '81mg', frequency: 'Once daily', time: 'Evening', taken: false },
-    ];
+    return activeMeds.map((med) => ({
+      ...med,
+      time: med.time_of_day || 'Scheduled',
+      taken: compliance[med.id] || false,
+    }));
   }, [activeMeds, compliance]);
 
-  // AI Insights (mock data)
-  const insights = [
-    {
-      id: '1',
-      title: 'Glucose trend rising',
-      message: 'Consider low-GI lunch options today',
-      variant: 'warning' as const,
-    },
-    {
-      id: '2',
-      title: 'Medication compliance excellent',
-      message: 'You\'ve taken all medications on time this week',
-      variant: 'success' as const,
-    },
-  ];
-
-
-  // Recent Activity (mock data)
-  const activities: ActivityItem[] = [
-    { id: '1', time: '8:00 AM', description: 'Medication taken' },
-    { id: '2', time: 'Yesterday', description: 'Lab report added' },
-    { id: '3', time: '2 days ago', description: 'Prescription updated' },
-  ];
+  // AI Insights - Hide if none exists for now
+  const insights: any[] = [];
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#000000' }}>
@@ -139,7 +148,7 @@ export function HomeDashboardScreen() {
                     {greeting}
                   </Text>
                   <Text fontSize="$9" fontWeight="800" color="#FFFFFF" marginTop="$1" letterSpacing={-0.5}>
-                    {profile?.name || 'Alex'} 👋
+                    {profile?.name || 'User'} 👋
                   </Text>
                 </YStack>
                 <Avatar size={52} style={{ borderWidth: 2, borderColor: 'rgba(255, 255, 255, 0.4)' }}>

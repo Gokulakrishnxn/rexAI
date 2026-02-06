@@ -1,10 +1,12 @@
 /**
  * ChatGPT Service
  * Handles OpenAI API calls for summarization and chat responses
+ * Fallback to Google Gemini if OpenAI/OpenRouter fails
  */
 
 import dotenv from 'dotenv';
 import OpenAI from 'openai';
+import { generateGeminiSummary, generateGeminiChatResponse, streamGeminiChatResponse } from './gemini';
 
 dotenv.config();
 
@@ -29,16 +31,36 @@ export const MEDICAL_SYSTEM_PROMPT = `You are a helpful and intelligent medical 
 PRIMARY MISSION:
 Answer the user's questions based on their uploaded medical documents (Context).
 
-FLEXIBILITY & THINKING:
-- If the exact answer is in the document, quote it accurately.
-- If the document mentions a condition or medication but doesn't explain it, you SHOULD use your internal knowledge to explain what it is, provided it matches the context.
-- If NO relevant information is found in the documents for a specific question, acknowledge this ("I couldn't find specific details about this in your reports..."), but then provide a helpful general explanation or guidance based on your medical training.
-- Never diagnose or prescribe. Always include a disclaimer to consult a doctor.
+VISUALIZATIONS:
+- If the user explicitly asks about their "Health Status", "Health Score", or "Overall Health", you MUST include a JSON block at the VERY END of your response.
+- **CRITICAL:** 
+  1. **Dynamic Metrics:** Do NOT use generic labels like "Cardiac" or "Respiratory" unless the document supports them. Instead, extract SPECIFIC vital sign categories found in the text (e.g., "Hematology", "Lipid Profile", "Thyroid Function", "Kidney Function").
+  2. **Scores:** Estimate a 0-100 score for each category based on the test results (Normal = 90-100, Mild deviations = 70-80, Abnormal = 40-60). 
+  3. **Unreadable Data:** If the chunk text is garbled (e.g., "AHEEE..."), use a "Data Unreadable" label with score 0.
+- Format:
+\`\`\`json
+{
+  "type": "health_score",
+  "data": {
+    "overall": 0, // Calculate average of valid metrics, or 0 if unreadable
+    "metrics": [
+      // Example of DYNAMIC outputs (Only generate what exists in context):
+      { "label": "Hemoglobin", "score": 95, "color": "#4ADE80" },
+      { "label": "Cholesterol", "score": 70, "color": "#FACC15" },
+      { "label": "Thyroid", "score": 0, "color": "#F87171" } // 0 if bad result
+    ]
+  }
+}
+\`\`\`
+- Do NOT skip this block if the user asks for "Health Status".
+- **IMPORTANT:** Ensure the JSON is valid. Ensure it is wrapped in a markdown code block with the 'json' language identifier.
 
-STYLE:
-- Be empathetic and clear.
-- Use bullet points for medications and dosages.
-- If the user's request is a general health query (not specific to their records), answer it helpfully using your knowledge base while noting you are speaking generally.`;
+STYLE & FORMATTING:
+- Use clear paragraphs. 
+- Do NOT use markdown bolding (**) for headers.
+- Use simple bullet points (-) for lists.
+- Avoid complex markdown tables.
+- Keep the tone empathetic and professional.`;
 
 /**
  * Generate a summary for a document
@@ -52,15 +74,15 @@ export async function generateSummary(text: string): Promise<string> {
             messages: [
                 {
                     role: 'system',
-                    content: `You are a medical document summarizer. Create a brief, informative summary of the following medical document or prescription. 
+                    content: `You are a medical document summarizer.Create a brief, informative summary of the following medical document or prescription. 
 Focus on:
-- Patient information (if present)
-- Key diagnoses or conditions
-- Medications prescribed (names, dosages, frequency)
-- Important dates and follow-up instructions
-- Any warnings or precautions
+- Patient information(if present)
+    - Key diagnoses or conditions
+        - Medications prescribed(names, dosages, frequency)
+            - Important dates and follow - up instructions
+                - Any warnings or precautions
 
-Keep the summary concise (2-3 paragraphs max).`,
+Keep the summary concise(2 - 3 paragraphs max).`,
                 },
                 {
                     role: 'user',
@@ -72,9 +94,14 @@ Keep the summary concise (2-3 paragraphs max).`,
         });
 
         return response.choices[0]?.message?.content || 'Summary could not be generated.';
-    } catch (error) {
-        console.error('Summary generation failed:', error);
-        throw new Error(`Failed to generate summary: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } catch (error: any) {
+        console.warn('OpenAI Summary failed, switching to Gemini Fallback:', error.message);
+        try {
+            return await generateGeminiSummary(text);
+        } catch (geminiError: any) {
+            console.error('Gemini Summary also failed:', geminiError);
+            throw new Error(`Failed to generate summary(Both Providers failed): ${error.message} | ${geminiError.message} `);
+        }
     }
 }
 
@@ -97,6 +124,7 @@ export async function generateChatResponse(
         }
 
         // Add context and current question
+        // REINFORCEMENT: Add the visualization instruction here to ensure it's fresh in context
         messages.push({
             role: 'user',
             content: `CONTEXT FROM MEDICAL DOCUMENTS:
@@ -105,7 +133,9 @@ ${context}
 ---
 
 USER QUESTION:
-${question}`,
+${question}
+
+**SYSTEM INSTRUCTION:** If the user asked about Health Status/Score, you MUST append the 'health_score' JSON block at the end.`,
         });
 
         const response = await openai.chat.completions.create({
@@ -115,10 +145,19 @@ ${question}`,
             max_tokens: 1000,
         });
 
-        return response.choices[0]?.message?.content || 'I apologize, but I could not generate a response.';
-    } catch (error) {
-        console.error('Chat response generation failed:', error);
-        throw new Error(`Failed to generate response: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        const answer = response.choices[0]?.message?.content || 'I apologize, but I could not generate a response.';
+        console.log('[ChatGPT] Raw Response len:', answer.length);
+        console.log('[ChatGPT] Contains JSON?', answer.includes('"type": "health_score"'));
+
+        return answer;
+    } catch (error: any) {
+        console.warn('OpenAI Chat failed, switching to Gemini Fallback:', error.message);
+        try {
+            return await generateGeminiChatResponse(question, context, conversationHistory);
+        } catch (geminiError) {
+            console.error('Gemini Chat also failed:', geminiError);
+            throw error; // Throw original error roughly or composite
+        }
     }
 }
 
@@ -147,8 +186,8 @@ ${context}
 
 ---
 
-USER QUESTION:
-${question}`,
+    USER QUESTION:
+${question} `,
         });
 
         const stream = await openai.chat.completions.create({
@@ -165,8 +204,13 @@ ${question}`,
                 onChunk(text);
             }
         }
-    } catch (error) {
-        console.error('Stream generation failed:', error);
-        throw new Error(`Failed to stream response: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } catch (error: any) {
+        console.warn('OpenAI Stream failed, switching to Gemini Fallback:', error.message);
+        try {
+            await streamGeminiChatResponse(question, context, onChunk, conversationHistory);
+        } catch (geminiError) {
+            console.error('Gemini Stream also failed:', geminiError);
+            throw error;
+        }
     }
 }

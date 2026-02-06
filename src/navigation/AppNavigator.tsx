@@ -8,7 +8,12 @@ import { ProfileSetupScreen } from '../screens/Onboarding/ProfileSetupScreen';
 import { QRSetupScreen } from '../screens/Onboarding/QRSetupScreen';
 import { EmergencyModeScreen } from '../screens/Home/EmergencyModeScreen';
 
+import { LoginScreen } from '../screens/Auth/LoginScreen';
+import { SignupScreen } from '../screens/Auth/SignupScreen';
+import { ActivityIndicator, View } from 'react-native';
+
 export type RootStackParamList = {
+  Auth: undefined;
   Onboarding: undefined;
   Main: undefined;
   EmergencyMode: undefined;
@@ -17,6 +22,16 @@ export type RootStackParamList = {
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const OnboardingStack = createNativeStackNavigator();
+const AuthStack = createNativeStackNavigator();
+
+function AuthStackScreen() {
+  return (
+    <AuthStack.Navigator screenOptions={{ headerShown: false }}>
+      <AuthStack.Screen name="Login" component={LoginScreen} />
+      <AuthStack.Screen name="Signup" component={SignupScreen} />
+    </AuthStack.Navigator>
+  );
+}
 
 function OnboardingStackScreen() {
   return (
@@ -30,13 +45,34 @@ function OnboardingStackScreen() {
 }
 
 export function AppNavigator() {
-  const { isOnboarded, isAuthenticated } = useAuthStore();
-  const showMain = isOnboarded && isAuthenticated;
+  const { isOnboarded, isAuthenticated, loading, initialize } = useAuthStore();
+
+  React.useEffect(() => {
+    initialize();
+
+    // Safety timeout: if auth takes > 10s, force stop loading
+    const timer = setTimeout(() => {
+      if (useAuthStore.getState().loading) {
+        console.warn('Auth initialization timed out');
+        useAuthStore.setState({ loading: false });
+      }
+    }, 10000);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
+        <ActivityIndicator size="large" color="#007AFF" />
+      </View>
+    );
+  }
 
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      {!showMain ? (
-        <Stack.Screen name="Onboarding" component={OnboardingStackScreen} />
+      {!isAuthenticated ? (
+        <Stack.Screen name="Auth" component={AuthStackScreen} />
       ) : (
         <>
           <Stack.Screen name="Main" component={TabNavigator} />

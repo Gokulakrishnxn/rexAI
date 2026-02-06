@@ -18,15 +18,14 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ResponsiveContainer } from '@/components/ui/ResponsiveContainer';
 import { Ionicons } from '@expo/vector-icons';
-import { useUserStore } from '../../store/useUserStore';
+import { useAuthStore } from '../../store/useAuthStore';
 import { useMedAgentStore } from '../../store/useMedAgentStore';
 import { useQRStore } from '../../store/useQRStore';
 import { QRDisplay } from '../../components/qr/QRDisplay';
 import { generateQRData } from '../../services/qrService';
-import { useAuthStore } from '../../store/useAuthStore';
 
 export function ProfileScreen() {
-  const { profile, setProfile } = useUserStore();
+  const { user: profile } = useAuthStore();
   const { activeMeds } = useMedAgentStore();
   const { currentQR, setCurrentQR } = useQRStore();
   const { signOut } = useAuthStore();
@@ -92,7 +91,7 @@ export function ProfileScreen() {
                       {profile?.name || 'User'}
                     </Text>
                     <Text fontSize="$4" color="$color10">
-                      {profile?.bloodType ? `Blood Type: ${profile.bloodType}` : 'No blood type set'}
+                      {profile?.blood_group ? `Health ID: ${profile.blood_group}` : 'No Health ID set'}
                     </Text>
                   </YStack>
                   <Button
@@ -127,22 +126,22 @@ export function ProfileScreen() {
                       <XStack alignItems="center" gap="$2">
                         <Ionicons name="calendar" size={16} color="#64748B" />
                         <Text fontSize="$3" color="$color10">
-                          Date of Birth: Not set
+                          Age: {profile?.age || 'Not set'}
                         </Text>
                       </XStack>
-                      {profile?.bloodType && (
+                      {profile?.blood_group && (
                         <XStack alignItems="center" gap="$2">
                           <Ionicons name="water" size={16} color="#64748B" />
                           <Text fontSize="$3" color="$color10">
-                            Blood Type: {profile.bloodType}
+                            Blood Group: {profile.blood_group}
                           </Text>
                         </XStack>
                       )}
-                      {profile?.emergencyContact && (
+                      {profile?.emergency_contact && (
                         <XStack alignItems="center" gap="$2">
                           <Ionicons name="call" size={16} color="#64748B" />
                           <Text fontSize="$3" color="$color10">
-                            Emergency: {profile.emergencyContact}
+                            Emergency: {profile.emergency_contact}
                           </Text>
                         </XStack>
                       )}
@@ -291,7 +290,7 @@ export function ProfileScreen() {
                               </Text>
                             </YStack>
                             <Text fontSize="$3" color="$blue10" fontWeight="600">
-                              Next: 8:00 AM
+                              {med.time_of_day || 'Scheduled'}
                             </Text>
                           </XStack>
                         ))

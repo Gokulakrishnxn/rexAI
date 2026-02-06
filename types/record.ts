@@ -20,4 +20,5 @@ export interface HealthRecord {
   // Ingestion status
   ingestionStatus: IngestionStatus;
   ingestionError?: string;
+  tags?: string[];
 }

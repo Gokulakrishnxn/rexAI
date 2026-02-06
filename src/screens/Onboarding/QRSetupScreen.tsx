@@ -6,9 +6,8 @@ import { useAuthStore } from '../../store/useAuthStore';
 export function QRSetupScreen() {
   const { setOnboarded, setAuthenticated } = useAuthStore();
 
-  const finish = () => {
-    setOnboarded(true);
-    setAuthenticated(true);
+  const finish = async () => {
+    await setOnboarded(true);
   };
 
   return (
