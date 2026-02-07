@@ -15,13 +15,15 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { HeaderWave } from '@/components/ui/HeaderWave';
 import { ResponsiveContainer } from '@/components/ui/ResponsiveContainer';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { AlertCircle, CheckCircle2, Info, ArrowRight, Pill } from 'lucide-react-native';
+import { AlertCircle, CheckCircle2, Info, ArrowRight, Pill, Calendar } from 'lucide-react-native';
+import { format } from 'date-fns';
 import * as Haptics from 'expo-haptics';
 import Animated from 'react-native-reanimated';
 import { useEntranceAnimation } from '../../hooks/useEntranceAnimation';
 import { useUserStore } from '../../store/useUserStore';
 import { useMedAgentStore } from '../../store/useMedAgentStore';
 import { useQRStore } from '../../store/useQRStore';
+import { useCalendarStore } from '../../store/useCalendarStore';
 import { generateQRData } from '../../services/qrService';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 
@@ -38,6 +40,11 @@ export function HomeDashboardScreen() {
   const { profile, setProfile } = useUserStore();
   const { activeMeds, compliance, markTaken } = useMedAgentStore();
   const { currentQR, setCurrentQR } = useQRStore();
+  const { appointments, loadAppointments } = useCalendarStore();
+
+  React.useEffect(() => {
+    loadAppointments();
+  }, [loadAppointments]);
 
   const { width: windowWidth } = Dimensions.get('window');
   const insightCardWidth = windowWidth * 0.8;
@@ -103,6 +110,15 @@ export function HomeDashboardScreen() {
   ];
 
 
+  // Next upcoming appointment (from calendar store)
+  const nextAppointment = useMemo(() => {
+    const now = new Date().toISOString();
+    const upcoming = appointments
+      .filter((a) => a.datetime >= now)
+      .sort((a, b) => a.datetime.localeCompare(b.datetime));
+    return upcoming[0] ?? null;
+  }, [appointments]);
+
   // Recent Activity (mock data)
   const activities: ActivityItem[] = [
     { id: '1', time: '8:00 AM', description: 'Medication taken' },
@@ -152,6 +168,34 @@ export function HomeDashboardScreen() {
             </YStack>
           </YStack>
 
+
+          {/* Upcoming Appointment */}
+          {nextAppointment && (
+            <YStack paddingHorizontal="$6" paddingTop="$4" paddingBottom="$2">
+              <XStack alignItems="center" gap="$2" marginBottom="$3">
+                <Calendar size={22} color="#007AFF" />
+                <Text fontSize="$7" fontWeight="700" color="$color" letterSpacing={-0.5}>
+                  Upcoming Appointment
+                </Text>
+              </XStack>
+              <Card
+                padding="$4"
+                borderRadius="$9"
+                backgroundColor="$muted"
+                borderWidth={1}
+                borderColor="$border"
+              >
+                <YStack gap="$2">
+                  <Text fontSize="$5" fontWeight="600" color="$color">
+                    {nextAppointment.specialty}
+                  </Text>
+                  <Text fontSize="$3" color="$mutedForeground">
+                    {format(new Date(nextAppointment.datetime), 'EEE, MMM d · h a')}
+                  </Text>
+                </YStack>
+              </Card>
+            </YStack>
+          )}
 
           {/* Today's Medications */}
           <YStack paddingHorizontal="$6" paddingTop="$6" paddingBottom="$2">

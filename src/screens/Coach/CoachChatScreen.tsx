@@ -17,10 +17,10 @@ import {
   Separator,
 } from 'tamagui';
 import { Ionicons } from '@expo/vector-icons';
-import { useChatStore, ChatSession } from '../../store/useChatStore';
+import { useChatStore } from '../../store/useChatStore';
 import { useRecordsStore } from '../../store/useRecordsStore';
-import { CustomMessageBubble } from '../../components/chat/CustomMessageBubble';
 import { ResponsiveContainer } from '@/components/ui/ResponsiveContainer';
+import { routeMessage } from '../../agents/routerAgent';
 
 
 export function CoachChatScreen() {
@@ -73,15 +73,15 @@ export function CoachChatScreen() {
         createdAt: new Date(),
       });
 
-      // Simulate AI response
-      setTimeout(() => {
+      // Router Agent: intent → handler or medAgentService (GENERAL)
+      routeMessage(msg.text).then(({ reply }) => {
         addMessage(currentChatId, {
           id: (Date.now() + 1).toString(),
-          text: "I'm Rex, your medical AI. How can I assist you with your records today?",
+          text: reply,
           userId: 'coach',
           createdAt: new Date(),
         });
-      }, 1000);
+      });
     }
   }, [addMessage, currentChatId]);
 
