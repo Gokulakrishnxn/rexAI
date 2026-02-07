@@ -21,30 +21,41 @@ import * as Haptics from 'expo-haptics';
 import Animated from 'react-native-reanimated';
 import { useEntranceAnimation } from '../../hooks/useEntranceAnimation';
 import { useUserStore } from '../../store/useUserStore';
-import { useMedAgentStore } from '../../store/useMedAgentStore';
+import { useMedicationStore } from '../../store/useMedicationStore';
 import { useQRStore } from '../../store/useQRStore';
 import { useCalendarStore } from '../../store/useCalendarStore';
 import { generateQRData } from '../../services/qrService';
-import type { RootStackParamList } from '../../navigation/AppNavigator';
+import type { HomeStackParamList } from '../../navigation/stacks/HomeStack';
+import { useTimelineStore } from '../../store/useTimelineStore';
+import { useTwinStore } from '../../store/useTwinStore';
+import { Activity } from 'lucide-react-native';
 
-type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
-
-interface ActivityItem {
-  id: string;
-  time: string;
-  description: string;
-}
+type NavigationProp = NativeStackNavigationProp<HomeStackParamList>;
 
 export function HomeDashboardScreen() {
   const navigation = useNavigation<NavigationProp>();
   const { profile, setProfile } = useUserStore();
-  const { activeMeds, compliance, markTaken } = useMedAgentStore();
+  const { medications, loadMedications, toggleTaken } = useMedicationStore();
   const { currentQR, setCurrentQR } = useQRStore();
   const { appointments, loadAppointments } = useCalendarStore();
+  const { events, loadEvents, getRecentEvents } = useTimelineStore();
+  const { twin, loadTwin, recomputeTwin } = useTwinStore();
 
   React.useEffect(() => {
     loadAppointments();
   }, [loadAppointments]);
+
+  React.useEffect(() => {
+    loadEvents();
+    loadTwin();
+    loadMedications();
+  }, [loadEvents, loadTwin, loadMedications]);
+
+  React.useEffect(() => {
+    if (events.length > 0) {
+      recomputeTwin(events);
+    }
+  }, [events, recomputeTwin]);
 
   const { width: windowWidth } = Dimensions.get('window');
   const insightCardWidth = windowWidth * 0.8;
@@ -78,20 +89,10 @@ export function HomeDashboardScreen() {
   }, [profile, currentQR?.fullUrl, setCurrentQR]);
 
 
-  // Today's medications (mock data if none)
+  // Today's medications
   const todaysMeds = useMemo(() => {
-    if (activeMeds.length > 0) {
-      return activeMeds.slice(0, 4).map((med) => ({
-        ...med,
-        time: 'Morning',
-        taken: compliance[med.id] || false,
-      }));
-    }
-    return [
-      { id: '1', name: 'Metformin', dosage: '500mg', frequency: 'Twice daily', time: 'Morning', taken: false },
-      { id: '2', name: 'Aspirin', dosage: '81mg', frequency: 'Once daily', time: 'Evening', taken: false },
-    ];
-  }, [activeMeds, compliance]);
+    return medications.filter(m => m.active);
+  }, [medications]);
 
   // AI Insights (mock data)
   const insights = [
@@ -119,12 +120,8 @@ export function HomeDashboardScreen() {
     return upcoming[0] ?? null;
   }, [appointments]);
 
-  // Recent Activity (mock data)
-  const activities: ActivityItem[] = [
-    { id: '1', time: '8:00 AM', description: 'Medication taken' },
-    { id: '2', time: 'Yesterday', description: 'Lab report added' },
-    { id: '3', time: '2 days ago', description: 'Prescription updated' },
-  ];
+  // Recent Activity from unified timeline (last 3)
+  const recentTimelineEvents = useMemo(() => getRecentEvents(3), [events]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#000000' }}>
@@ -168,6 +165,61 @@ export function HomeDashboardScreen() {
             </YStack>
           </YStack>
 
+
+
+          {/* Digital Twin Summary Card */}
+          {twin && (
+            <YStack paddingHorizontal="$6" marginTop="$-6" marginBottom="$4" zIndex={2}>
+              <Card
+                padding="$4"
+                borderRadius="$9"
+                backgroundColor="$background"
+                shadowColor="rgba(0,0,0,0.1)"
+                shadowOffset={{ width: 0, height: 4 }}
+                shadowOpacity={0.1}
+                shadowRadius={8}
+                elevation={4}
+                borderWidth={1}
+                borderColor="$border"
+                onPress={() => navigation.navigate('TwinInsights')}
+              >
+                <XStack justifyContent="space-between" alignItems="center">
+                  <XStack gap="$3" alignItems="center">
+                    <YStack
+                      width={48}
+                      height={48}
+                      borderRadius="$full"
+                      backgroundColor={twin.riskLevel === 'Low' ? '$green4' : twin.riskLevel === 'Moderate' ? '$orange4' : '$red4'}
+                      alignItems="center"
+                      justifyContent="center"
+                    >
+                      <Activity size={24} color={twin.riskLevel === 'Low' ? '#15803d' : twin.riskLevel === 'Moderate' ? '#c2410c' : '#b91c1c'} />
+                    </YStack>
+                    <YStack>
+                      <Text fontSize="$3" color="$mutedForeground" textTransform="uppercase" fontWeight="600">
+                        Digital Twin Risk
+                      </Text>
+                      <Text fontSize="$6" fontWeight="800" color="$color">
+                        {twin.riskLevel} • {twin.riskScore}%
+                      </Text>
+                    </YStack>
+                  </XStack>
+                  <Button size="$3" chromeless icon={<ArrowRight size={20} color="$color" />} />
+                </XStack>
+
+                {twin.nudges.length > 0 && (
+                  <YStack marginTop="$3" paddingTop="$3" borderTopWidth={1} borderColor="$border" gap="$2">
+                    <Text fontSize="$3" fontWeight="600" color="$color">
+                      Smart Nudge
+                    </Text>
+                    <Text fontSize="$3" color="$mutedForeground">
+                      {twin.nudges[0]}
+                    </Text>
+                  </YStack>
+                )}
+              </Card>
+            </YStack>
+          )}
 
           {/* Upcoming Appointment */}
           {nextAppointment && (
@@ -235,17 +287,17 @@ export function HomeDashboardScreen() {
                           pressStyle={{ scale: 0.98, backgroundColor: '$background' }}
                           onPress={() => {
                             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                            markTaken(med.id);
+                            toggleTaken(med.id);
                           }}
                         >
                           <XStack alignItems="center" gap="$4">
                             <Checkbox
-                              checked={med.taken}
-                              onCheckedChange={() => markTaken(med.id)}
+                              checked={med.takenToday}
+                              onCheckedChange={() => toggleTaken(med.id)}
                               size="$6"
                               borderRadius="$full"
-                              backgroundColor={med.taken ? '$healthSuccess' : 'transparent'}
-                              borderColor={med.taken ? '$healthSuccess' : '$border'}
+                              backgroundColor={med.takenToday ? '$healthSuccess' : 'transparent'}
+                              borderColor={med.takenToday ? '$healthSuccess' : '$border'}
                             >
                               <Checkbox.Indicator>
                                 <CheckCircle2 size={18} color="white" />
@@ -253,7 +305,7 @@ export function HomeDashboardScreen() {
                             </Checkbox>
                             <YStack flex={1} gap="$1">
                               <XStack alignItems="center" gap="$2">
-                                <Text fontSize="$5" fontWeight="600" color={med.taken ? '$mutedForeground' : '$color'} textDecorationLine={med.taken ? 'line-through' : 'none'}>
+                                <Text fontSize="$5" fontWeight="600" color={med.takenToday ? '$mutedForeground' : '$color'} textDecorationLine={med.takenToday ? 'line-through' : 'none'}>
                                   {med.name}
                                 </Text>
                                 <XStack
@@ -263,7 +315,7 @@ export function HomeDashboardScreen() {
                                   backgroundColor="$blue10"
                                 >
                                   <Text fontSize="$1" fontWeight="700" color="white">
-                                    {med.time}
+                                    {med.times[0] || 'Anytime'}
                                   </Text>
                                 </XStack>
                               </XStack>
@@ -271,7 +323,7 @@ export function HomeDashboardScreen() {
                                 {med.dosage} • {med.frequency}
                               </Text>
                             </YStack>
-                            {med.taken && (
+                            {med.takenToday && (
                               <CheckCircle2 size={24} color="#32D74B" />
                             )}
                           </XStack>
@@ -390,15 +442,26 @@ export function HomeDashboardScreen() {
           )}
 
 
-          {/* Recent Activity */}
-          {activities.length > 0 && (
-            <YStack paddingHorizontal="$6" paddingTop="$6" paddingBottom="$8">
-              <Text fontSize="$7" fontWeight="700" color="$color" marginBottom="$4" letterSpacing={-0.5}>
-                Timeline
+          {/* Recent Activity — unified timeline */}
+          <YStack paddingHorizontal="$6" paddingTop="$6" paddingBottom="$8">
+            <XStack justifyContent="space-between" alignItems="center" marginBottom="$4">
+              <Text fontSize="$7" fontWeight="700" color="$color" letterSpacing={-0.5}>
+                Recent Activity
               </Text>
+              <Button
+                size="$2"
+                chromeless
+                paddingHorizontal="$3"
+                paddingVertical="$2"
+                onPress={() => navigation.navigate('Timeline')}
+              >
+                <Text fontSize="$3" color="#3B82F6" fontWeight="600">View All</Text>
+              </Button>
+            </XStack>
+            {recentTimelineEvents.length > 0 ? (
               <YStack gap="$0">
-                {activities.map((activity, index) => (
-                  <XStack key={activity.id} gap="$4" paddingVertical="$3">
+                {recentTimelineEvents.map((event, index) => (
+                  <XStack key={event.id} gap="$4" paddingVertical="$3">
                     <YStack alignItems="center">
                       <XStack
                         width={12}
@@ -409,25 +472,29 @@ export function HomeDashboardScreen() {
                         borderColor={index === 0 ? '$color' : '$border'}
                         marginTop="$1.5"
                       />
-                      {index < activities.length - 1 && (
+                      {index < recentTimelineEvents.length - 1 && (
                         <XStack width={2} flex={1} backgroundColor="$border" marginVertical="$1" />
                       )}
                     </YStack>
                     <YStack flex={1} gap="$0.5">
                       <XStack justifyContent="space-between">
                         <Text fontSize="$4" fontWeight="600" color="$color">
-                          {activity.description}
+                          {event.title}
                         </Text>
                         <Text fontSize="$2" fontWeight="500" color="$mutedForeground">
-                          {activity.time}
+                          {format(new Date(event.timestamp), 'MMM d, h:mm a')}
                         </Text>
                       </XStack>
                     </YStack>
                   </XStack>
                 ))}
               </YStack>
-            </YStack>
-          )}
+            ) : (
+              <Text fontSize="$3" color="$mutedForeground">
+                No recent activity. Book an appointment, scan a plate, or generate a SOAP note.
+              </Text>
+            )}
+          </YStack>
         </ResponsiveContainer>
       </ScrollView>
     </SafeAreaView>

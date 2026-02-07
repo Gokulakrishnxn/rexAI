@@ -1,9 +1,17 @@
 /**
- * Booking intent — schedule visit via calendar tool (offline, free).
- * Simple parsing: tomorrow, time (e.g. 4 pm).
+ * Booking intent — suggest appointment and ask for confirmation.
+ * Does NOT auto-book; returns suggestedTool for UI confirmation button.
  */
 
-import { bookAppointment } from '../../tools/calendarTool';
+import { format } from 'date-fns';
+
+export interface BookingResult {
+  replyText: string;
+  suggestedTool?: {
+    type: 'BOOK_APPOINTMENT';
+    payload: { title: string; datetime: string };
+  };
+}
 
 function parseSpecialty(text: string): string {
   const t = text.toLowerCase();
@@ -41,10 +49,18 @@ function buildDatetime(isTomorrow: boolean, hour: number, minute: number): strin
   return d.toISOString();
 }
 
+function formatBookingLabel(specialty: string, datetime: string): string {
+  const d = new Date(datetime);
+  const isTomorrow = d.toDateString() === new Date(Date.now() + 86400000).toDateString();
+  const dateLabel = isTomorrow ? 'Tomorrow' : format(d, 'EEEE, MMM d');
+  const timeLabel = format(d, 'h a');
+  return `${specialty} ${dateLabel} ${timeLabel}`;
+}
+
 export async function handleBooking(
   userText: string,
-  source: 'chat' | 'voice' | 'call' = 'chat'
-): Promise<string> {
+  _source: 'chat' | 'voice' | 'call' = 'chat'
+): Promise<BookingResult> {
   const t = userText.toLowerCase();
   const hasTomorrow = t.includes('tomorrow');
   const time = parseTime(userText);
@@ -52,14 +68,27 @@ export async function handleBooking(
 
   if (hasDateOrTime(t) && time) {
     const datetime = buildDatetime(hasTomorrow, time.hour, time.minute);
-    return bookAppointment(specialty, datetime, source);
+    const label = formatBookingLabel(specialty, datetime);
+    return {
+      replyText: `✅ Appointment draft found: ${label}. Tap "Book Appointment" to confirm and save locally. (Google Calendar sync when OAuth is added.)`,
+      suggestedTool: {
+        type: 'BOOK_APPOINTMENT',
+        payload: { title: specialty, datetime },
+      },
+    };
   }
 
   if (hasDateOrTime(t) && !time) {
-    // e.g. "book tomorrow" without time — default 10 am
     const datetime = buildDatetime(hasTomorrow, 10, 0);
-    return bookAppointment(specialty, datetime, source);
+    const label = formatBookingLabel(specialty, datetime);
+    return {
+      replyText: `✅ Appointment draft found: ${label}. Tap "Book Appointment" to confirm and save locally. (Google Calendar sync when OAuth is added.)`,
+      suggestedTool: {
+        type: 'BOOK_APPOINTMENT',
+        payload: { title: specialty, datetime },
+      },
+    };
   }
 
-  return 'Which doctor and what time?';
+  return { replyText: 'Which doctor and what time?' };
 }

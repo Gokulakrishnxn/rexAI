@@ -161,6 +161,42 @@ export function RecordsDashboardScreen() {
             contentContainerStyle={{ paddingBottom: 100 }}
             showsVerticalScrollIndicator={false}
           >
+            {/* Scan Plate entry */}
+            <YStack paddingHorizontal="$4" marginBottom="$4">
+              <Button
+                backgroundColor="#1C1C1E"
+                borderRadius="$6"
+                padding="$4"
+                borderWidth={1}
+                borderColor="#2C2C2E"
+                onPress={() => navigation.navigate('PlateScan')}
+                icon={<Ionicons name="nutrition" size={22} color="#3B82F6" />}
+              >
+                <XStack flex={1} justifyContent="space-between" alignItems="center" width="100%">
+                  <Text color="white" fontWeight="600" fontSize="$4">Scan Plate</Text>
+                  <Ionicons name="chevron-forward" size={20} color="#8E8E93" />
+                </XStack>
+              </Button>
+            </YStack>
+
+            {/* SOAP Notes entry */}
+            <YStack paddingHorizontal="$4" marginBottom="$4">
+              <Button
+                backgroundColor="#1C1C1E"
+                borderRadius="$6"
+                padding="$4"
+                borderWidth={1}
+                borderColor="#2C2C2E"
+                onPress={() => navigation.navigate('SoapNote', {})}
+                icon={<Ionicons name="document-text" size={22} color="#3B82F6" />}
+              >
+                <XStack flex={1} justifyContent="space-between" alignItems="center" width="100%">
+                  <Text color="white" fontWeight="600" fontSize="$4">SOAP Notes</Text>
+                  <Ionicons name="chevron-forward" size={20} color="#8E8E93" />
+                </XStack>
+              </Button>
+            </YStack>
+
             {/* Search Bar */}
             <YStack paddingHorizontal="$4" marginBottom="$4">
               <XStack

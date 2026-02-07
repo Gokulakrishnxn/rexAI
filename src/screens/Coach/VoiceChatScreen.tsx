@@ -7,8 +7,8 @@ import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { Room } from 'livekit-client';
 import { connectToRoom, startAudioStream, stopAudioStream } from '../../services/livekitVoiceService';
-import { routeMessage } from '../../agents/routerAgent';
-import { getRealtimeVoiceReply } from '../../services/realtimeAgentService';
+import { routeMessage, type SuggestedTool } from '../../agents/routerAgent';
+import { bookAppointment } from '../../tools/calendarTool';
 
 const { width } = Dimensions.get('window');
 
@@ -19,6 +19,7 @@ export function VoiceChatScreen() {
 
   const [roomConnected, setRoomConnected] = useState(false);
   const [replyText, setReplyText] = useState<string | null>(null);
+  const [suggestedTool, setSuggestedTool] = useState<SuggestedTool | null>(null);
   const [loading, setLoading] = useState(false);
   const [simulateText, setSimulateText] = useState('');
 
@@ -67,20 +68,29 @@ export function VoiceChatScreen() {
     if (!t) return;
     setLoading(true);
     setReplyText(null);
+    setSuggestedTool(null);
     try {
-      const { intent, reply } = await routeMessage(t, 'voice');
-      if (intent === 'GENERAL') {
-        const realtime = await getRealtimeVoiceReply(t);
-        setReplyText(realtime.text);
-      } else {
-        setReplyText(reply);
-      }
+      const { replyText: text, suggestedTool: tool } = await routeMessage(t, 'voice');
+      setReplyText(text);
+      setSuggestedTool(tool ?? null);
     } catch {
       setReplyText("Something went wrong. Try again.");
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const handleConfirmBooking = useCallback(
+    (title: string, datetime: string) => {
+      setLoading(true);
+      bookAppointment(title, datetime, 'voice').then((resultText) => {
+        setReplyText(resultText);
+        setSuggestedTool(null);
+        setLoading(false);
+      });
+    },
+    []
+  );
 
   const handleClose = useCallback(() => {
     stopAudioStream(roomRef.current ?? undefined);
@@ -157,9 +167,24 @@ export function VoiceChatScreen() {
               backgroundColor="#1C1C1E"
               maxWidth={width - 48}
               alignSelf="center"
+              gap="$3"
             >
-              <Text fontSize="$2" color="#8E8E93" marginBottom="$1">Rex says</Text>
-              <Text fontSize="$4" color="white">{replyText}</Text>
+              <YStack>
+                <Text fontSize="$2" color="#8E8E93" marginBottom="$1">Rex says</Text>
+                <Text fontSize="$4" color="white">{replyText}</Text>
+              </YStack>
+              {suggestedTool?.type === 'BOOK_APPOINTMENT' && suggestedTool.payload && (
+                <Button
+                  size="$4"
+                  backgroundColor="#007AFF"
+                  onPress={() =>
+                    handleConfirmBooking(suggestedTool.payload.title, suggestedTool.payload.datetime)
+                  }
+                  icon={<Ionicons name="calendar" size={20} color="white" />}
+                >
+                  Book Appointment
+                </Button>
+              )}
             </YStack>
           )}
 

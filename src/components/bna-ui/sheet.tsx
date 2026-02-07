@@ -1,5 +1,5 @@
-import { ScrollView } from './ui/scroll-view';
-import { Text } from './ui/text';
+import { ScrollView } from './scroll-view';
+import { Text } from './text';
 
 export default function SheetScreen() {
   return (

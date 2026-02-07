@@ -4,6 +4,7 @@ import * as Haptics from 'expo-haptics';
 import Animated from 'react-native-reanimated';
 import { useEntranceAnimation } from '../../hooks/useEntranceAnimation';
 import { ScrollView } from '@/components/ui/scroll-view';
+import { useNavigation } from '@react-navigation/native'; // Added navigation hook
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   YStack,
@@ -15,6 +16,7 @@ import {
   Switch,
   Dialog,
 } from 'tamagui';
+import { DEMO_MODE } from '../../constants/config';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ResponsiveContainer } from '@/components/ui/ResponsiveContainer';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,8 +26,11 @@ import { useQRStore } from '../../store/useQRStore';
 import { QRDisplay } from '../../components/qr/QRDisplay';
 import { generateQRData } from '../../services/qrService';
 import { useAuthStore } from '../../store/useAuthStore';
+import { useEmergencyStore } from '../../store/useEmergencyStore';
+import { Input } from 'tamagui';
 
 export function ProfileScreen() {
+  const navigation = useNavigation<any>(); // Initialized navigation
   const { profile, setProfile } = useUserStore();
   const { activeMeds } = useMedAgentStore();
   const { currentQR, setCurrentQR } = useQRStore();
@@ -34,7 +39,24 @@ export function ProfileScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [dataSyncEnabled, setDataSyncEnabled] = useState(true);
 
-  // Generate QR codes
+  // Emergency Contact State
+  const { primaryContactName, primaryContactPhone, setContact, loadContact } = useEmergencyStore();
+  const [contactName, setContactName] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
+
+  React.useEffect(() => {
+    loadContact();
+  }, []);
+
+  React.useEffect(() => {
+    if (primaryContactName) setContactName(primaryContactName);
+    if (primaryContactPhone) setContactPhone(primaryContactPhone);
+  }, [primaryContactName, primaryContactPhone]);
+
+  const handleSaveContact = async () => {
+    await setContact(contactName, contactPhone);
+    Alert.alert('Success', 'Emergency contact updated');
+  };
   const emergencyQR = currentQR?.fullUrl || (profile ? generateQRData(profile).fullUrl : '');
   const fullRecordsQR = emergencyQR; // In real app, this would be different
 
@@ -80,6 +102,18 @@ export function ProfileScreen() {
                 borderRadius="$9"
                 backgroundColor="$background"
               >
+                {/* Hackathon Demo Banner */}
+                {DEMO_MODE && (
+                  <Button
+                    theme="yellow_active"
+                    marginBottom="$4"
+                    onPress={() => navigation.navigate('DemoChecklist' as any)}
+                    icon={<Ionicons name="construct" size={18} />}
+                  >
+                    <Text fontWeight="bold">Open Hackathon Demo Checklist</Text>
+                  </Button>
+                )}
+
                 <XStack alignItems="center" gap="$4">
                   <Avatar size={64}>
                     <AvatarImage source={{ uri: undefined }} />
@@ -302,6 +336,60 @@ export function ProfileScreen() {
                       )}
                     </YStack>
                   </Accordion.Content>
+
+                </Accordion.Item>
+
+                {/* Emergency Contact Configuration */}
+                <Accordion.Item value="emergency_contact" marginTop="$3">
+                  <Accordion.Trigger
+                    flexDirection="row"
+                    justifyContent="space-between"
+                    padding="$4"
+                    borderRadius="$8"
+                    backgroundColor="$background"
+                    borderWidth={1}
+                    borderColor="$red9"
+                  >
+                    <XStack alignItems="center" gap="$3">
+                      <Ionicons name="warning" size={20} color="#FF3B30" />
+                      <Text fontSize="$5" fontWeight="600" color="$color">
+                        Emergency Contact
+                      </Text>
+                    </XStack>
+                    <Accordion.Content>
+                      <Ionicons name="chevron-down" size={20} color="#64748B" />
+                    </Accordion.Content>
+                  </Accordion.Trigger>
+                  <Accordion.Content padding="$4" backgroundColor="$gray1">
+                    <YStack gap="$4">
+                      <YStack gap="$2">
+                        <Text fontSize="$3" color="$color10">Name</Text>
+                        <Input
+                          value={contactName}
+                          onChangeText={setContactName}
+                          placeholder="Caretaker Name"
+                          backgroundColor="$background"
+                        />
+                      </YStack>
+                      <YStack gap="$2">
+                        <Text fontSize="$3" color="$color10">Phone Number</Text>
+                        <Input
+                          value={contactPhone}
+                          onChangeText={setContactPhone}
+                          placeholder="+1234567890"
+                          keyboardType="phone-pad"
+                          backgroundColor="$background"
+                        />
+                      </YStack>
+                      <Button
+                        onPress={handleSaveContact}
+                        backgroundColor="$red9"
+                        theme="active" // Removed invalid color prop, used theme or just keep bg
+                      >
+                        <Text color="white">Save Contact</Text>
+                      </Button>
+                    </YStack>
+                  </Accordion.Content>
                 </Accordion.Item>
 
                 {/* Data & Privacy */}
@@ -491,6 +579,6 @@ export function ProfileScreen() {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog>
-    </SafeAreaView>
+    </SafeAreaView >
   );
 }

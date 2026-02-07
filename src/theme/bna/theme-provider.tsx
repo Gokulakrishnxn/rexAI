@@ -3,7 +3,7 @@ import {
   DefaultTheme,
   ThemeProvider as RNThemeProvider,
 } from '@react-navigation/native';
-import { Colors } from '@/theme/colors';
+import { Colors } from './colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 
 type Props = {

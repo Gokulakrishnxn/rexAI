@@ -1,10 +1,13 @@
 import { create } from 'zustand';
+import type { SuggestedTool } from '../agents/routerAgent';
 
 export interface ChatMessage {
   id: string;
   text: string;
   userId: string;
   createdAt: Date;
+  /** When present, UI shows a confirmation action (e.g. Book Appointment). */
+  suggestedTool?: SuggestedTool;
 }
 
 export interface ChatSession {

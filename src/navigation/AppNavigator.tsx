@@ -7,12 +7,14 @@ import { PermissionsScreen } from '../screens/Onboarding/PermissionsScreen';
 import { ProfileSetupScreen } from '../screens/Onboarding/ProfileSetupScreen';
 import { QRSetupScreen } from '../screens/Onboarding/QRSetupScreen';
 import { EmergencyModeScreen } from '../screens/Home/EmergencyModeScreen';
+import { SoapNoteScreen } from '../screens/Records/SoapNoteScreen';
 
 export type RootStackParamList = {
   Onboarding: undefined;
   Main: undefined;
   EmergencyMode: undefined;
   VoiceChat: undefined;
+  SoapNote: { noteId?: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -53,6 +55,7 @@ export function AppNavigator() {
               animation: 'fade_from_bottom',
             }}
           />
+          <Stack.Screen name="SoapNote" component={SoapNoteScreen} />
         </>
       )}
     </Stack.Navigator>

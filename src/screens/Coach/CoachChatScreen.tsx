@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import { KeyboardAvoidingView, Platform } from 'react-native';
+import { KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GiftedChat, IMessage, InputToolbar, Bubble, Send, Composer } from 'react-native-gifted-chat';
 import { useNavigation } from '@react-navigation/native';
@@ -19,15 +19,22 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useChatStore } from '../../store/useChatStore';
 import { useRecordsStore } from '../../store/useRecordsStore';
+import { useSoapStore } from '../../store/useSoapStore';
+import { useTimelineStore } from '../../store/useTimelineStore';
 import { ResponsiveContainer } from '@/components/ui/ResponsiveContainer';
 import { routeMessage } from '../../agents/routerAgent';
+import { generateSoapNote } from '../../services/soapService';
+import { bookAppointment } from '../../tools/calendarTool';
 
 
 export function CoachChatScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { chats, currentChatId, addMessage, createNewChat, switchChat, deleteChat } = useChatStore();
-  const { records } = useRecordsStore();
+  const { records, addRecord } = useRecordsStore();
+  const { addNote } = useSoapStore();
+  const addTimelineEvent = useTimelineStore((s) => s.addEvent);
   const [openHistory, setOpenHistory] = useState(false);
+  const [soapLoading, setSoapLoading] = useState(false);
   const [inputText, setInputText] = useState('');
   const [mentionQuery, setMentionQuery] = useState('');
   const [showMentions, setShowMentions] = useState(false);
@@ -46,7 +53,7 @@ export function CoachChatScreen() {
     }
   }, [chats.length, currentChatId]);
 
-  // Convert store messages to GiftedChat format
+  // Convert store messages to GiftedChat format (include suggestedTool for UI)
   const giftedMessages: IMessage[] = useMemo(() => {
     if (!currentChat) return [];
     return [...currentChat.messages].reverse().map((msg) => ({
@@ -58,6 +65,7 @@ export function CoachChatScreen() {
         name: msg.userId === 'user' ? 'You' : 'Rex.ai',
         avatar: msg.userId === 'user' ? undefined : '🦖',
       },
+      suggestedTool: msg.suggestedTool,
     }));
   }, [currentChat?.messages]);
 
@@ -73,48 +81,133 @@ export function CoachChatScreen() {
         createdAt: new Date(),
       });
 
-      // Router Agent: intent → handler or medAgentService (GENERAL)
-      routeMessage(msg.text).then(({ reply }) => {
+      // Router Agent: intent → handler or LLM (GENERAL), with optional suggestedTool
+      const recentMessages = currentChat?.messages
+        ?.slice(-6)
+        .map((m) => ({ role: (m.userId === 'user' ? 'user' : 'assistant') as 'user' | 'assistant', content: m.text }));
+      routeMessage(msg.text, 'chat', { recentMessages }).then(({ intent, replyText, suggestedTool }) => {
         addMessage(currentChatId, {
           id: (Date.now() + 1).toString(),
-          text: reply,
+          text: replyText,
           userId: 'coach',
           createdAt: new Date(),
+          suggestedTool,
         });
+
+        if (intent === 'EMERGENCY') {
+          // Small delay to let the user read the reply, then navigate
+          setTimeout(() => {
+            navigation.navigate('EmergencyMode');
+          }, 1500);
+          addTimelineEvent({
+            id: Date.now().toString(),
+            type: 'emergency',
+            title: 'Emergency Mode Activated',
+            summary: 'Triggered via Chat',
+            timestamp: new Date().toISOString(),
+            source: 'chat'
+          });
+        }
       });
     }
   }, [addMessage, currentChatId]);
 
+  const handleGenerateSoap = useCallback(async () => {
+    if (!currentChat?.messages?.length) return;
+    setSoapLoading(true);
+    try {
+      const lastMessages = currentChat.messages.slice(-10);
+      const transcript = lastMessages
+        .map((m) => `${m.userId === 'user' ? 'Patient' : 'Rex'}: ${m.text}`)
+        .join('\n');
+      const note = await generateSoapNote(transcript, 'chat');
+      await addNote(note);
+      addRecord({
+        id: `soap_rec_${note.id}`,
+        type: 'other',
+        title: 'SOAP Note Generated',
+        date: new Date().toISOString(),
+        summary: `Assessment: ${note.assessment.slice(0, 80)}${note.assessment.length > 80 ? '…' : ''}`,
+        doctor: 'Rex SOAP',
+      });
+      addTimelineEvent({
+        id: `tl_soap_${note.id}`,
+        type: 'soap_note',
+        title: 'SOAP note generated',
+        summary: note.assessment.slice(0, 80),
+        timestamp: note.createdAt,
+        source: 'chat',
+      });
+      navigation.navigate('SoapNote', { noteId: note.id });
+    } catch {
+      // ignore
+    } finally {
+      setSoapLoading(false);
+    }
+  }, [currentChat?.messages, addNote, addRecord, addTimelineEvent, navigation]);
+
+  const handleConfirmBooking = useCallback(
+    (title: string, datetime: string) => {
+      if (!currentChatId) return;
+      bookAppointment(title, datetime, 'chat').then((resultText) => {
+        addMessage(currentChatId, {
+          id: (Date.now() + 1).toString(),
+          text: resultText,
+          userId: 'coach',
+          createdAt: new Date(),
+        });
+      });
+    },
+    [currentChatId, addMessage]
+  );
 
   const renderBubble = (props: any) => {
+    const suggestedTool = props.currentMessage?.suggestedTool as { type: string; payload: { title: string; datetime: string } } | undefined;
+    const isBookAppointment = suggestedTool?.type === 'BOOK_APPOINTMENT';
+
     return (
-      <Bubble
-        {...props}
-        wrapperStyle={{
-          right: {
-            backgroundColor: '#007AFF',
-            borderRadius: 18,
-            paddingHorizontal: 12,
-            paddingVertical: 8,
-          },
-          left: {
-            backgroundColor: '#1C1C1E',
-            borderRadius: 18,
-            paddingHorizontal: 12,
-            paddingVertical: 8,
-          },
-        }}
-        textStyle={{
-          right: {
-            color: 'white',
-            fontSize: 15,
-          },
-          left: {
-            color: '#FFFFFF',
-            fontSize: 15,
-          },
-        }}
-      />
+      <YStack gap="$2">
+        <Bubble
+          {...props}
+          wrapperStyle={{
+            right: {
+              backgroundColor: '#007AFF',
+              borderRadius: 18,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+            },
+            left: {
+              backgroundColor: '#1C1C1E',
+              borderRadius: 18,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+            },
+          }}
+          textStyle={{
+            right: {
+              color: 'white',
+              fontSize: 15,
+            },
+            left: {
+              color: '#FFFFFF',
+              fontSize: 15,
+            },
+          }}
+        />
+        {isBookAppointment && suggestedTool?.payload && (
+          <Button
+            size="$3"
+            backgroundColor="#007AFF"
+            alignSelf="flex-start"
+            onPress={() =>
+              handleConfirmBooking(suggestedTool.payload.title, suggestedTool.payload.datetime)
+            }
+            icon={<Ionicons name="calendar" size={18} color="white" />}
+          >
+            Book Appointment
+          </Button>
+        )}
+      </YStack>
     );
   };
 
@@ -291,13 +384,30 @@ export function CoachChatScreen() {
             <Text fontSize="$5" fontWeight="600" color="white">
               {currentChat?.title === 'New Chat' ? 'Rex.ai' : currentChat?.title}
             </Text>
-            <Button
-              size="$3"
-              circular
-              chromeless
-              onPress={() => createNewChat()}
-              icon={<Ionicons name="create-outline" size={24} color="white" />}
-            />
+            <XStack gap="$2">
+              <Button
+                size="$2"
+                chromeless
+                paddingHorizontal="$3"
+                paddingVertical="$2"
+                borderRadius="$4"
+                backgroundColor="#1C1C1E"
+                onPress={handleGenerateSoap}
+                disabled={!currentChat?.messages?.length || soapLoading}
+                icon={soapLoading ? undefined : <Ionicons name="document-text-outline" size={18} color="#3B82F6" />}
+              >
+                <Text fontSize="$2" color="#3B82F6" fontWeight="600">
+                  {soapLoading ? 'Generating…' : 'SOAP Summary'}
+                </Text>
+              </Button>
+              <Button
+                size="$3"
+                circular
+                chromeless
+                onPress={() => createNewChat()}
+                icon={<Ionicons name="create-outline" size={24} color="white" />}
+              />
+            </XStack>
           </XStack>
 
           <Separator borderColor="#1C1C1E" />

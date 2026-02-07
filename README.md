@@ -1,6 +1,8 @@
 # Rex Healthify
 
-A React Native app built with [Expo](https://expo.dev), created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A React Native health assistant (Expo + TypeScript + Tamagui + Zustand) with live GPT-4o chat, plate scan vision, SOAP notes, timeline, emergency mode, and booking. Backend: Node.js + Express in `/server` (OpenAI + Gemini fallback).
+
+**Quick start:** See [RELEASE.md](./RELEASE.md) for full setup, keys, run commands, and smoke test. Backend: `server/README.md`.
 
 ## Android Studio setup
 

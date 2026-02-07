@@ -8,6 +8,8 @@ const KEYS = {
   AUTH_TOKEN: 'auth_token',
   USER_PROFILE: 'user_profile',
   CALENDAR_APPOINTMENTS: 'calendar_appointments',
+  SOAP_NOTES: 'soap_notes',
+  TIMELINE_EVENTS: 'timeline_events',
 };
 
 export async function getToken(): Promise<string | null> {

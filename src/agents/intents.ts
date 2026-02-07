@@ -8,6 +8,7 @@ export type RexIntent =
   | 'TRIAGE'
   | 'BOOKING'
   | 'LITERACY'
+  | 'TODAY_PLAN'
   | 'GENERAL';
 
 const EMERGENCY_KEYWORDS = [
@@ -25,6 +26,10 @@ const BOOKING_KEYWORDS = [
 const LITERACY_KEYWORDS = [
   'explain', 'what is', 'medicine', 'medication', 'diagnosis',
   'meaning', 'hinglish', 'simple', 'understand',
+];
+const TODAY_PLAN_KEYWORDS = [
+  'what should i do today', 'today plan', 'my day today', 'schedule today',
+  'what\'s on today', 'today\'s plan', 'anything today',
 ];
 
 function normalize(text: string): string {
@@ -47,5 +52,6 @@ export function detectIntent(userText: string): RexIntent {
   if (hasAnyKeyword(t, TRIAGE_KEYWORDS)) return 'TRIAGE';
   if (hasAnyKeyword(t, BOOKING_KEYWORDS)) return 'BOOKING';
   if (hasAnyKeyword(t, LITERACY_KEYWORDS)) return 'LITERACY';
+  if (hasAnyKeyword(t, TODAY_PLAN_KEYWORDS)) return 'TODAY_PLAN';
   return 'GENERAL';
 }

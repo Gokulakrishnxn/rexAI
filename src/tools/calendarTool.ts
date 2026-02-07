@@ -5,8 +5,13 @@
 
 import type { AppointmentEvent } from '../types/appointment';
 import { useCalendarStore } from '../store/useCalendarStore';
+import { useTimelineStore } from '../store/useTimelineStore';
 import { format } from 'date-fns';
 import * as googleCalendarService from '../services/googleCalendarService';
+
+function toTimelineSource(s: 'chat' | 'voice' | 'call'): 'chat' | 'voice' | 'system' {
+  return s === 'call' ? 'system' : s;
+}
 
 export async function bookAppointment(
   specialty: string,
@@ -33,12 +38,29 @@ export async function bookAppointment(
     const d = new Date(datetime);
     const dateLabel = isTomorrow(d) ? 'Tomorrow' : format(d, 'MMM d, yyyy');
     const timeLabel = format(d, 'h a');
+    const { addEvent } = useTimelineStore.getState();
+    await addEvent({
+      id: `tl_apt_${id}`,
+      type: 'appointment',
+      title: `Appointment booked: ${specialty}`,
+      timestamp: new Date().toISOString(),
+      source: toTimelineSource(source),
+    });
     return `✅ Appointment booked: ${specialty} — ${dateLabel} ${timeLabel} (Google Calendar).`;
   }
 
   // 2. Fallback: local booking (already implemented)
   const { addAppointment } = useCalendarStore.getState();
   await addAppointment(event);
+
+  const { addEvent } = useTimelineStore.getState();
+  await addEvent({
+    id: `tl_apt_${id}`,
+    type: 'appointment',
+    title: `Appointment booked: ${specialty}`,
+    timestamp: new Date().toISOString(),
+    source: toTimelineSource(source),
+  });
 
   const d = new Date(datetime);
   const dateLabel = isTomorrow(d) ? 'Tomorrow' : format(d, 'MMM d, yyyy');

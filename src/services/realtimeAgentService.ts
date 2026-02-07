@@ -1,41 +1,14 @@
 /**
- * Realtime voice agent: OpenAI GPT-4o Realtime (primary) → Gemini 1.5 Flash text (fallback).
- * Flow: Voice → LiveKit → Backend voice worker → OpenAI Realtime → audio back.
- * If OpenAI fails, fallback: Gemini Flash text API → show text reply.
+ * Voice reply: backend only when EXPO_PUBLIC_API_URL is set (GPT-4o → Gemini server-side).
+ * No API keys in app. When backend unreachable, return offline message.
  */
 
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? '';
-const GEMINI_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '';
 
 export interface RealtimeReply {
   audio?: ArrayBuffer;
   text: string;
   fromFallback: boolean;
-}
-
-/**
- * Request realtime voice response from backend (OpenAI Realtime).
- * Backend pipes: user audio → OpenAI gpt-4o-realtime-preview → audio response.
- * Returns text for fallback display when audio not available.
- */
-async function tryOpenAIRealtime(transcript: string): Promise<RealtimeReply | null> {
-  if (!API_BASE) return null;
-  try {
-    const res = await fetch(`${API_BASE}/api/voice/realtime`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transcript, model: 'gpt-4o-realtime-preview' }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return {
-      text: data.text ?? transcript,
-      audio: data.audio ? base64ToBuffer(data.audio) : undefined,
-      fromFallback: false,
-    };
-  } catch {
-    return null;
-  }
 }
 
 function base64ToBuffer(b64: string): ArrayBuffer {
@@ -45,40 +18,28 @@ function base64ToBuffer(b64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-/**
- * Fallback: Gemini 1.5 Flash text API (free tier).
- */
-async function getGeminiTextReply(userText: string): Promise<string> {
-  if (!GEMINI_KEY) {
-    return "I'm Rex. Voice is offline right now. Try typing in chat.";
-  }
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: userText }] }],
-          generationConfig: { maxOutputTokens: 256 },
-        }),
-      }
-    );
-    if (!res.ok) throw new Error('Gemini request failed');
-    const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    return typeof text === 'string' ? text.trim() : "I didn't catch that. Can you repeat?";
-  } catch {
-    return "I'm Rex. I couldn't reach the AI right now. Try again or use chat.";
-  }
-}
+const OFFLINE_MESSAGE = "I'm Rex. Voice AI needs the backend. Set EXPO_PUBLIC_API_URL and run the server, or use chat.";
 
 /**
- * Get voice reply: try OpenAI Realtime via backend; on failure use Gemini Flash text.
+ * Get voice reply via backend only. Backend uses OpenAI then Gemini fallback.
+ * When backend is unreachable, return offline message (no client-side Gemini).
  */
 export async function getRealtimeVoiceReply(transcript: string): Promise<RealtimeReply> {
-  const openAI = await tryOpenAIRealtime(transcript);
-  if (openAI) return openAI;
-  const text = await getGeminiTextReply(transcript);
-  return { text, fromFallback: true };
+  if (!API_BASE) {
+    return { text: OFFLINE_MESSAGE, fromFallback: true };
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/voice/realtime`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transcript }),
+    });
+    if (!res.ok) return { text: "I'm Rex. Voice AI is unavailable. Try chat.", fromFallback: true };
+    const data = await res.json();
+    const text = data?.text ?? "I didn't catch that. Can you repeat?";
+    const audio = data?.audio ? base64ToBuffer(data.audio) : undefined;
+    return { text, audio, fromFallback: false };
+  } catch {
+    return { text: "I'm Rex. I couldn't reach the backend. Try chat.", fromFallback: true };
+  }
 }

@@ -4,5 +4,5 @@
  */
 
 export function handleEmergency(): string {
-  return 'This may be serious. Please call emergency services now.';
+  return 'I am activating Emergency Mode now. Please stay calm.';
 }
