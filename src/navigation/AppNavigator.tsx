@@ -18,6 +18,8 @@ export type RootStackParamList = {
   Main: undefined;
   EmergencyMode: undefined;
   VoiceChat: undefined;
+  AnalyzingPrescription: { imageBase64: string; imageUri: string };
+  MedicationReview: { preloadedDrafts?: any[]; imageUri?: string; imageBase64?: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -89,6 +91,17 @@ export function AppNavigator() {
               animation: 'fade_from_bottom',
             }}
           />
+          <Stack.Screen
+            name="MedicationReview"
+            component={require('../screens/Medication/MedicationReviewScreen').MedicationReviewScreen}
+            options={{ presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="AnalyzingPrescription"
+            component={require('../screens/Medication/AnalyzingPrescriptionScreen').AnalyzingPrescriptionScreen}
+            options={{ presentation: 'fullScreenModal', animation: 'fade' }}
+          />
+
         </>
       )}
     </Stack.Navigator>

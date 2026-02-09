@@ -11,6 +11,7 @@ const router = Router();
 interface ChatRequest {
     question: string;
     sessionId?: string;
+    documentId?: string; // Optional filter
 }
 
 /**
@@ -43,13 +44,9 @@ function compressContext(
     return context.trim();
 }
 
-/**
- * POST /api/chat
- * Process a chat message with RAG
- */
 router.post('/', verifyFirebaseToken as any, async (req: FirebaseRequest, res: Response) => {
     try {
-        const { question, sessionId } = req.body as ChatRequest;
+        const { question, sessionId, documentId } = req.body as ChatRequest;
         const userId = req.user!.id;
 
         if (!question) {
@@ -76,8 +73,8 @@ router.post('/', verifyFirebaseToken as any, async (req: FirebaseRequest, res: R
         }
 
         const queryEmbedding = await embedText(question);
-        console.log(`[RAG] Embedding generated. Searching for chunks...`);
-        const similarChunks = await searchSimilarChunks(userId, queryEmbedding, 6, 0.15);
+        console.log(`[RAG] Embedding generated. Searching for chunks... Filter: ${documentId || 'None'}`);
+        const similarChunks = await searchSimilarChunks(userId, queryEmbedding, 6, 0.15, documentId || null);
         console.log(`[RAG] Found ${similarChunks.length} relevant chunks similar to query.`);
 
         // Fetch user profile for context

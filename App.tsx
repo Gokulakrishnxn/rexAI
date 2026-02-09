@@ -10,7 +10,7 @@ import { ErrorBoundary } from './src/components/ErrorBoundary';
 export default function App() {
   return (
     <ErrorBoundary>
-      <TamaguiProvider config={config} defaultTheme="dark">
+      <TamaguiProvider config={config} defaultTheme="light">
         <PortalProvider>
           <ToastProvider>
             <NavigationContainer>
@@ -23,7 +23,7 @@ export default function App() {
               right={0}
               alignItems="center"
             />
-            <StatusBar style="light" />
+            <StatusBar style="dark" />
           </ToastProvider>
         </PortalProvider>
       </TamaguiProvider>

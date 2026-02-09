@@ -1,136 +1,234 @@
-import React, { useState } from 'react';
-import { ScrollView as RNScrollView, FlatList } from 'react-native';
+import React, { useState, useMemo, useCallback } from 'react';
+import { 
+  ScrollView, 
+  TouchableOpacity, 
+  View, 
+  StyleSheet, 
+  TextInput,
+  Image,
+  ActivityIndicator,
+  Alert,
+  Keyboard,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
-import {
-  YStack,
-  XStack,
-  Card,
-  Text,
-  Button,
-  Checkbox,
-  Tabs,
-  Progress,
-  Input,
-  ScrollView,
-} from 'tamagui';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { Text, XStack } from 'tamagui';
 import * as DocumentPicker from 'expo-document-picker';
-import { ResponsiveContainer } from '@/components/ui/ResponsiveContainer';
-import { Ionicons } from '@expo/vector-icons';
+import { 
+  Search, 
+  X, 
+  Settings, 
+  Clock, 
+  ChevronRight,
+  Camera,
+  FileText,
+  Shield,
+  FlaskConical,
+  Image as ImageIcon,
+} from 'lucide-react-native';
+import * as Haptics from 'expo-haptics';
 import { useRecordsStore } from '../../store/useRecordsStore';
-import { useMedAgentStore } from '../../store/useMedAgentStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import type { RecordsStackParamList } from '../../navigation/stacks/RecordsStack';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { uploadToStorage, deleteFromStorage } from '@/services/supabase';
-import { triggerIngestion, fetchUserDocuments } from '@/services/api/backendApi';
-import { Alert, ActivityIndicator, View } from 'react-native';
-import { HealthRecord, IngestionStatus } from '../../../types/record';
+import { deleteFromStorage } from '@/services/supabase';
+import { fetchUserDocuments } from '@/services/api/backendApi';
+import { HealthRecord } from '../../../types/record';
 
 type NavigationProp = NativeStackNavigationProp<RecordsStackParamList>;
 
-interface SummaryCardProps {
+type FilterType = 'All' | 'Medical' | 'Results' | 'Admin';
+
+interface DocumentCardData {
+  id: string;
   title: string;
-  children: React.ReactNode;
-}
-
-function SummaryCard({ title, children }: SummaryCardProps) {
-  return (
-    <Card
-      flex={1}
-      padding="$4"
-      borderRadius="$5"
-      backgroundColor="$background"
-      borderWidth={1}
-      borderColor="$borderColor"
-      minWidth={160}
-    >
-      <Text fontSize="$4" fontWeight="700" color="$color" marginBottom="$3">
-        {title}
-      </Text>
-      {children}
-    </Card>
-  );
-}
-
-function PillBadge({ label, variant = 'default' }: { label: string; variant?: 'default' | 'destructive' | 'success' }) {
-  const bgColor = variant === 'destructive' ? '$red4' : variant === 'success' ? '$green4' : '$blue4';
-  const textColor = variant === 'destructive' ? '$red11' : variant === 'success' ? '$green11' : '$blue11';
-
-  return (
-    <XStack
-      paddingHorizontal="$2"
-      paddingVertical="$1"
-      borderRadius="$4"
-      backgroundColor={bgColor}
-      marginRight="$1"
-      marginBottom="$1"
-    >
-      <Text fontSize="$2" fontWeight="600" color={textColor}>
-        {label}
-      </Text>
-    </XStack>
-  );
+  subtitle: string;
+  date: string;
+  status: 'analyzed' | 'processing' | 'stored' | 'error';
+  category: string;
+  imageUrl?: string;
+  type: string;
 }
 
 export function RecordsDashboardScreen() {
   const navigation = useNavigation<NavigationProp>();
-  const { records, setRecords, addRecord, updateRecord, removeRecord } = useRecordsStore();
-  const { activeMeds, compliance } = useMedAgentStore();
+  const { records, setRecords, removeRecord } = useRecordsStore();
   const { user: profile } = useAuthStore();
-  const [activeTab, setActiveTab] = useState('timeline');
+  const [activeFilter, setActiveFilter] = useState<FilterType>('All');
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const [recentSearches, setRecentSearches] = useState<string[]>(['Blood test results', 'Lisinopril Rx']);
 
-  const [uploading, setUploading] = useState(false);
   const USER_ID = profile?.id;
 
-  React.useEffect(() => {
-    const loadRecords = async () => {
-      try {
-        const docs = await fetchUserDocuments();
-        if (docs && docs.length > 0) {
-          const formattedRecords: HealthRecord[] = docs.map((doc: any) => ({
-            id: doc.id,
-            type: (doc.file_type?.includes('image') ? 'imaging' : doc.file_type?.includes('pdf') ? 'lab' : 'other') as any,
-            title: doc.file_name,
-            date: doc.created_at,
-            summary: doc.summary,
-            doctor: 'AI Extracted',
-            hospital: 'My Health',
-            ingestionStatus: 'complete',
-            documentId: doc.id,
-            storagePath: doc.file_url,
-          }));
-          setRecords(formattedRecords);
+  useFocusEffect(
+    useCallback(() => {
+      const loadRecords = async () => {
+        try {
+          const docs = await fetchUserDocuments();
+          if (docs && docs.length > 0) {
+            const formattedRecords: HealthRecord[] = docs.map((doc: any) => ({
+              id: doc.id,
+              type: doc.doc_category || (doc.file_type?.includes('image') ? 'imaging' : doc.file_type?.includes('pdf') ? 'lab' : 'other'),
+              title: doc.file_name,
+              date: doc.created_at,
+              summary: doc.summary,
+              doctor: doc.doctor || 'AI Extracted',
+              hospital: doc.hospital || 'My Health',
+              ingestionStatus: doc.validation_status === 'verified' ? 'complete' : 'processing',
+              documentId: doc.id,
+              storagePath: doc.file_url,
+              imageUrl: doc.file_url,
+            }));
+            setRecords(formattedRecords);
+          }
+        } catch (error) {
+          console.error('Error fetching records:', error);
+        } finally {
+          setLoading(false);
         }
-      } catch (error) {
-        console.error('Error fetching records:', error);
-      } finally {
+      };
+
+      if (USER_ID) {
+        loadRecords();
+      } else {
         setLoading(false);
       }
-    };
+    }, [USER_ID])
+  );
 
-    loadRecords();
-  }, [USER_ID]);
+  // Map records to display format
+  const documentCards: DocumentCardData[] = useMemo(() => {
+    return records.map((record) => ({
+      id: record.id,
+      title: record.title || 'Untitled Document',
+      subtitle: `${record.doctor || 'Unknown'} • ${record.hospital || 'General'}`,
+      date: new Date(record.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase(),
+      status: record.ingestionStatus === 'complete' ? 'analyzed' : 
+              record.ingestionStatus === 'processing' ? 'processing' : 
+              record.ingestionStatus === 'error' ? 'error' : 'stored',
+      category: getCategoryLabel(record.type),
+      imageUrl: record.storagePath,
+      type: record.type,
+    }));
+  }, [records]);
 
-  const getStatusColor = (status: IngestionStatus): string => {
-    switch (status) {
-      case 'complete': return '#4ADE80';
-      case 'processing': return '#3B82F6';
-      case 'uploading': return '#F59E0B';
-      case 'error': return '#EF4444';
-      default: return '#9CA3AF';
+  // Filter documents
+  const filteredDocuments = useMemo(() => {
+    let docs = [...documentCards];
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      docs = docs.filter(doc => 
+        doc.title.toLowerCase().includes(query) ||
+        doc.subtitle.toLowerCase().includes(query) ||
+        doc.category.toLowerCase().includes(query)
+      );
     }
+
+    // Apply category filter
+    if (activeFilter === 'Medical') {
+      docs = docs.filter(doc => ['Prescription', 'Medical'].includes(doc.category));
+    } else if (activeFilter === 'Results') {
+      docs = docs.filter(doc => ['Lab Report', 'Imaging'].includes(doc.category));
+    } else if (activeFilter === 'Admin') {
+      docs = docs.filter(doc => ['Insurance', 'Invoice', 'Other'].includes(doc.category));
+    }
+
+    return docs;
+  }, [documentCards, searchQuery, activeFilter]);
+
+  // Separate into recent and older
+  const recentDocuments = useMemo(() => {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    return filteredDocuments.filter(doc => {
+      const docDate = new Date(records.find(r => r.id === doc.id)?.date || '');
+      return docDate >= thirtyDaysAgo;
+    });
+  }, [filteredDocuments, records]);
+
+  const olderDocuments = useMemo(() => {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    return filteredDocuments.filter(doc => {
+      const docDate = new Date(records.find(r => r.id === doc.id)?.date || '');
+      return docDate < thirtyDaysAgo;
+    });
+  }, [filteredDocuments, records]);
+
+  // Filter counts
+  const filterCounts = useMemo(() => ({
+    All: documentCards.length,
+    Medical: documentCards.filter(d => ['Prescription', 'Medical'].includes(d.category)).length,
+    Results: documentCards.filter(d => ['Lab Report', 'Imaging'].includes(d.category)).length,
+    Admin: documentCards.filter(d => ['Insurance', 'Invoice', 'Other'].includes(d.category)).length,
+  }), [documentCards]);
+
+  function getCategoryLabel(type: string): string {
+    switch (type) {
+      case 'prescription': return 'Prescription';
+      case 'lab_report': 
+      case 'lab': return 'Lab Report';
+      case 'imaging': return 'Imaging';
+      case 'insurance': return 'Insurance';
+      case 'invoice': return 'Invoice';
+      default: return 'Other';
+    }
+  }
+
+  function getStatusConfig(status: string) {
+    switch (status) {
+      case 'analyzed':
+        return { label: 'ANALYZED', color: '#34C759', bgColor: '#E8F8ED' };
+      case 'processing':
+        return { label: 'PROCESSING', color: '#FF9500', bgColor: '#FFF4E5' };
+      case 'stored':
+        return { label: 'STORED', color: '#8E8E93', bgColor: '#F2F2F7' };
+      case 'error':
+        return { label: 'ERROR', color: '#FF3B30', bgColor: '#FFE5E5' };
+      default:
+        return { label: 'PENDING', color: '#8E8E93', bgColor: '#F2F2F7' };
+    }
+  }
+
+  function getCategoryIcon(category: string) {
+    switch (category) {
+      case 'Prescription':
+        return <FileText size={20} color="#FF9500" strokeWidth={2} />;
+      case 'Lab Report':
+        return <FlaskConical size={20} color="#007AFF" strokeWidth={2} />;
+      case 'Imaging':
+        return <ImageIcon size={20} color="#5856D6" strokeWidth={2} />;
+      case 'Insurance':
+        return <Shield size={20} color="#007AFF" strokeWidth={2} />;
+      default:
+        return <FileText size={20} color="#8E8E93" strokeWidth={2} />;
+    }
+  }
+
+  const handleSearch = (text: string) => {
+    setSearchQuery(text);
   };
 
-  const getStatusText = (status: IngestionStatus): string => {
-    switch (status) {
-      case 'complete': return 'Processed';
-      case 'processing': return 'Processing...';
-      case 'uploading': return 'Uploading...';
-      case 'error': return 'Failed';
-      default: return 'Pending';
+  const handleSearchSubmit = () => {
+    if (searchQuery.trim() && !recentSearches.includes(searchQuery.trim())) {
+      setRecentSearches(prev => [searchQuery.trim(), ...prev.slice(0, 4)]);
     }
+    Keyboard.dismiss();
+  };
+
+  const handleRecentSearchTap = (search: string) => {
+    setSearchQuery(search);
+    Haptics.selectionAsync();
+  };
+
+  const cancelSearch = () => {
+    setSearchQuery('');
+    setIsSearchFocused(false);
+    Keyboard.dismiss();
   };
 
   const handleUpload = async () => {
@@ -138,6 +236,9 @@ export function RecordsDashboardScreen() {
       Alert.alert('Error', 'Please log in to upload documents');
       return;
     }
+    
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['application/pdf', 'image/*'],
@@ -148,92 +249,48 @@ export function RecordsDashboardScreen() {
 
       const { assets } = result;
       if (assets && assets[0]) {
-        setUploading(true);
         const file = assets[0];
-        const recordId = Date.now().toString();
-
-        // Create a new record with uploading status
-        const newRecord: HealthRecord = {
-          id: recordId,
-          type: file.mimeType?.includes('image') ? 'imaging' : file.mimeType?.includes('pdf') ? 'lab' : 'other',
-          title: file.name,
-          date: new Date().toISOString(),
+        
+        // Navigate to processing screen
+        navigation.navigate('DocumentProcessing', {
           fileUri: file.uri,
-          doctor: 'Pending Data Extraction',
-          ingestionStatus: 'uploading'
-        };
-
-        addRecord(newRecord);
-
-        try {
-          // Step 1: Upload to Storage
-          const { url, path } = await uploadToStorage(
-            USER_ID,
-            file.uri,
-            file.name,
-            file.mimeType || 'application/octet-stream'
-          );
-
-          updateRecord(recordId, {
-            supabaseUrl: url,
-            storagePath: path,
-            ingestionStatus: 'processing',
-          });
-
-          // Step 2: Trigger ingestion
-          const ingestResult = await triggerIngestion({
-            fileUrl: url,
-            fileName: file.name,
-            fileType: file.mimeType || 'application/octet-stream',
-          });
-
-          if (ingestResult.success) {
-            updateRecord(recordId, {
-              documentId: ingestResult.documentId,
-              summary: ingestResult.summary,
-              ingestionStatus: 'complete',
-              doctor: 'Extracted via AI'
-            });
-          } else {
-            updateRecord(recordId, {
-              ingestionStatus: 'error',
-              ingestionError: ingestResult.error,
-            });
-            Alert.alert('Processing Failed', ingestResult.error || 'Unknown error');
-          }
-        } catch (e: any) {
-          console.error('Upload/Ingestion error:', e);
-          updateRecord(recordId, {
-            ingestionStatus: 'error',
-            ingestionError: e.message,
-          });
-          Alert.alert('Error', 'Failed to process file: ' + e.message);
-        } finally {
-          setUploading(false);
-        }
+          fileName: file.name,
+          mimeType: file.mimeType || 'application/octet-stream',
+          userId: USER_ID,
+        });
       }
     } catch (error) {
       console.error('Error picking document:', error);
-      setUploading(false);
+      Alert.alert('Error', 'Failed to select document. Please try again.');
     }
   };
 
-  const handleDelete = async (record: HealthRecord) => {
+  const handleDelete = async (docId: string) => {
+    const record = records.find(r => r.id === docId);
+    if (!record) return;
+
     Alert.alert(
-      "Delete Record",
-      "Are you sure you want to delete this record?",
+      "Delete Document",
+      "Are you sure you want to delete this document?",
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Delete",
           style: "destructive",
           onPress: async () => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             if (record.storagePath) {
               try {
                 await deleteFromStorage(record.storagePath);
               } catch (e) {
                 console.warn('Failed to delete from storage:', e);
               }
+            }
+            try {
+              const { deleteDocument } = await import('@/services/api/backendApi');
+              await deleteDocument(record.id);
+            } catch (e) {
+              console.error('Failed to delete from backend:', e);
             }
             removeRecord(record.id);
           }
@@ -242,360 +299,417 @@ export function RecordsDashboardScreen() {
     );
   };
 
-  // No mock data - use empty arrays or live data
-  const conditions = [];
-  const allergies = profile?.allergies || [];
-  const vaccinations = [];
+  const renderDocumentCard = (doc: DocumentCardData, dimmed: boolean = false) => {
+    const statusConfig = getStatusConfig(doc.status);
+    
+    return (
+      <TouchableOpacity
+        key={doc.id}
+        style={[styles.documentCard, dimmed && styles.documentCardDimmed]}
+        activeOpacity={0.7}
+        onPress={() => navigation.navigate('RecordDetail', { id: doc.id })}
+        onLongPress={() => handleDelete(doc.id)}
+      >
+        {/* Thumbnail */}
+        <View style={styles.thumbnail}>
+          {doc.imageUrl ? (
+            <Image 
+              source={{ uri: doc.imageUrl }} 
+              style={styles.thumbnailImage}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={styles.thumbnailPlaceholder}>
+              {getCategoryIcon(doc.category)}
+            </View>
+          )}
+        </View>
 
-  const timelineRecords = records;
-  const prescriptions = activeMeds;
+        {/* Content */}
+        <View style={styles.cardContent}>
+          <XStack justifyContent="space-between" alignItems="flex-start">
+            <Text fontSize={16} fontWeight="700" color="#1C1C1E" flex={1} numberOfLines={1}>
+              {doc.title}
+            </Text>
+            <Text fontSize={12} color="#8E8E93" marginLeft={8}>
+              {doc.date}
+            </Text>
+          </XStack>
 
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case 'lab': return 'flask';
-      case 'prescription': return 'medical';
-      case 'imaging': return 'scan';
-      default: return 'document-text';
-    }
+          <Text fontSize={13} color="#8E8E93" marginTop={2} numberOfLines={1}>
+            {doc.subtitle}
+          </Text>
+
+          <XStack alignItems="center" gap="$2" marginTop={8}>
+            <View style={[styles.statusBadge, { backgroundColor: statusConfig.bgColor }]}>
+              <Text fontSize={10} fontWeight="700" color={statusConfig.color}>
+                {statusConfig.label}
+              </Text>
+            </View>
+            <Text fontSize={12} color="#8E8E93">•</Text>
+            <Text fontSize={12} color="#8E8E93">{doc.category}</Text>
+          </XStack>
+        </View>
+
+        {/* Chevron */}
+        <ChevronRight size={18} color="#C7C7CC" strokeWidth={2} />
+      </TouchableOpacity>
+    );
   };
-
-  const complianceRate = prescriptions.length > 0
-    ? Object.values(compliance).filter(Boolean).length / prescriptions.length
-    : 0;
 
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000000' }}>
+      <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#007AFF" />
       </View>
     );
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#000000' }}>
-      <YStack flex={1} backgroundColor="#000000">
-        <ResponsiveContainer>
-          {/* Header Title */}
-          <XStack paddingHorizontal="$4" paddingTop="$2" paddingBottom="$4" alignItems="center" justifyContent="space-between">
-            <Text fontSize="$8" fontWeight="800" color="white" letterSpacing={-0.5}>
-              Medical Records
+    <View style={styles.container}>
+      <SafeAreaView style={{ flex: 1 }}>
+        {/* Header */}
+        {!isSearchFocused ? (
+          <View style={styles.header}>
+            <Text fontSize={28} fontWeight="800" color="#1C1C1E">
+              My Documents
             </Text>
-            <Button size="$3" circular chromeless icon={<Ionicons name="filter" size={24} color="white" />} />
-          </XStack>
-
-          <RNScrollView
-            style={{ flex: 1 }}
-            contentContainerStyle={{ paddingBottom: 100 }}
-            showsVerticalScrollIndicator={false}
-          >
-            {/* Search Bar */}
-            <YStack paddingHorizontal="$4" marginBottom="$4">
-              <XStack
-                backgroundColor="#1C1C1E"
-                borderRadius="$10"
-                paddingHorizontal="$4"
-                alignItems="center"
-                height={50}
-                borderWidth={1}
-                borderColor="#2C2C2E"
-              >
-                <Ionicons name="search" size={20} color="#8E8E93" />
-                <Input
-                  flex={1}
-                  backgroundColor="transparent"
-                  borderWidth={0}
-                  placeholder="Search records..."
-                  placeholderTextColor="$gray10"
-                  color="white"
-                  fontSize="$4"
-                  marginLeft="$2"
-                />
-              </XStack>
-            </YStack>
-
-            {/* Filter Pills */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} paddingHorizontal="$4" marginBottom="$6">
-              <XStack gap="$3">
-                {['All', 'Lab Result', 'Prescription', 'Imaging'].map((filter) => {
-                  const isActive = (filter === 'All' && activeTab === 'timeline') ||
-                    (filter === 'Prescription' && activeTab === 'prescriptions') ||
-                    (filter === 'Lab Result' && activeTab === 'labs');
-                  return (
-                    <Button
-                      key={filter}
-                      backgroundColor={isActive ? '$blue10' : '#1C1C1E'}
-                      borderRadius="$10"
-                      paddingHorizontal="$4"
-                      height={40}
-                      pressStyle={{ opacity: 0.8 }}
-                      onPress={() => {
-                        if (filter === 'All') setActiveTab('timeline');
-                        if (filter === 'Prescription') setActiveTab('prescriptions');
-                        if (filter === 'Lab Result') setActiveTab('labs');
-                      }}
-                      borderWidth={isActive ? 0 : 1}
-                      borderColor={isActive ? 'transparent' : '#2C2C2E'}
-                    >
-                      <Text color={isActive ? 'white' : '#8E8E93'} fontWeight="600">
-                        {filter}
-                      </Text>
-                    </Button>
-                  );
-                })}
-              </XStack>
-            </ScrollView>
-
-            {/* Stats Summary Card */}
-            <YStack paddingHorizontal="$4" marginBottom="$6">
-              <Card
-                backgroundColor="#1C1C1E"
-                borderRadius="$4"
-                padding="$5"
-                borderWidth={1}
-                borderColor="#2C2C2E"
-              >
-                <XStack justifyContent="space-between" paddingHorizontal="$4">
-                  <YStack alignItems="center" gap="$2">
-                    <XStack alignItems="center" gap="$2">
-                      <Ionicons name="folder-open" size={18} color="#E0E0E0" />
-                      <Text color="#E0E0E0" fontSize="$6" fontWeight="700">{records.length}</Text>
-                    </XStack>
-                    <Text color="#8E8E93" fontSize="$2" fontWeight="600">Total</Text>
-                  </YStack>
-
-                  <YStack alignItems="center" gap="$2">
-                    <XStack alignItems="center" gap="$2">
-                      <Ionicons name="checkmark-circle" size={18} color="#4ADE80" />
-                      <Text color="#4ADE80" fontSize="$6" fontWeight="700">
-                        {records.filter(r => r.type === 'lab').length}
-                      </Text>
-                    </XStack>
-                    <Text color="#4ADE80" fontSize="$2" fontWeight="600">Labs</Text>
-                  </YStack>
-
-                  <YStack alignItems="center" gap="$2">
-                    <XStack alignItems="center" gap="$2">
-                      <Ionicons name="copy" size={18} color="#F59E0B" />
-                      <Text color="#F59E0B" fontSize="$6" fontWeight="700">
-                        {records.filter(r => r.type === 'prescription').length}
-                      </Text>
-                    </XStack>
-                    <Text color="#F59E0B" fontSize="$2" fontWeight="600">Meds</Text>
-                  </YStack>
-                </XStack>
-              </Card>
-            </YStack>
-
-            {/* Content Tabs Area */}
-            <YStack paddingHorizontal="$4">
-
-              {/* Timeline Tab */}
-              {activeTab === 'timeline' && (
-                <YStack gap="$4" paddingBottom="$8">
-                  {timelineRecords.map((record) => (
-                    <Card
-                      key={record.id}
-                      padding="$4"
-                      borderRadius="$6"
-                      backgroundColor="#1C1C1E"
-                      borderWidth={1}
-                      borderColor="#2C2C2E"
-                      pressStyle={{ opacity: 0.9, backgroundColor: '#2C2C2E' }}
-                      onPress={() => navigation.navigate('RecordDetail', { id: record.id })}
-                    >
-                      <YStack gap="$3">
-                        {/* Header: Icon + Title */}
-                        <XStack gap="$3" alignItems="flex-start">
-                          <XStack
-                            width={44}
-                            height={44}
-                            borderRadius="$4"
-                            backgroundColor="#111827" // Dark blue-ish gray
-                            alignItems="center"
-                            justifyContent="center"
-                          >
-                            <Ionicons name={getTypeIcon(record.type)} size={22} color="#3B82F6" />
-                          </XStack>
-                          <YStack flex={1} gap="$1">
-                            <Text fontSize="$5" fontWeight="700" color="white" lineHeight={22}>
-                              {record.title}
-                            </Text>
-                            <XStack alignItems="center" gap="$2">
-                              <Text fontSize="$3" color="#3B82F6" fontWeight="500">
-                                {record.type === 'lab' ? 'labResult' : record.type}
-                              </Text>
-                              <XStack alignItems="center" gap="$1.5">
-                                <XStack width={6} height={6} borderRadius={3} backgroundColor={getStatusColor(record.ingestionStatus)} />
-                                <Text fontSize="$2" color={getStatusColor(record.ingestionStatus)} fontWeight="600">
-                                  {getStatusText(record.ingestionStatus)}
-                                </Text>
-                              </XStack>
-                            </XStack>
-                          </YStack>
-                          <Button
-                            size="$2"
-                            circular
-                            chromeless
-                            onPress={() => handleDelete(record as any)}
-                            icon={<Ionicons name="trash-outline" size={18} color="#EF4444" />}
-                          />
-                        </XStack>
-
-                        {/* Description / Summary */}
-                        <Text fontSize="$3" color="#9CA3AF" lineHeight={20} numberOfLines={2}>
-                          {record.summary || "No summary available for this record."}
-                        </Text>
-
-                        {/* Metadata: Doctor + Date */}
-                        <XStack justifyContent="space-between" alignItems="center" marginTop="$1">
-                          <XStack alignItems="center" gap="$2">
-                            <Ionicons name="person" size={14} color="#6B7280" />
-                            <Text fontSize="$3" color="#9CA3AF">
-                              {record.doctor || 'Dr. Sarah Johnson'}
-                            </Text>
-                          </XStack>
-                          <XStack alignItems="center" gap="$2">
-                            <Ionicons name="calendar-outline" size={14} color="#6B7280" />
-                            <Text fontSize="$3" color="#9CA3AF">
-                              {new Date(record.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-                            </Text>
-                          </XStack>
-                        </XStack>
-
-                        {/* Tags - Hide if none */}
-                        {record.tags && record.tags.length > 0 && (
-                          <XStack gap="$2" flexWrap="wrap" marginTop="$1">
-                            {record.tags.map((tag) => (
-                              <XStack key={tag} backgroundColor="#374151" paddingHorizontal="$3" paddingVertical="$1.5" borderRadius="$4">
-                                <Text fontSize="$2" color="#D1D5DB" fontWeight="500">{tag}</Text>
-                              </XStack>
-                            ))}
-                          </XStack>
-                        )}
-                      </YStack>
-                    </Card>
-                  ))}
-                </YStack>
+            <XStack gap="$4">
+              <TouchableOpacity onPress={() => setIsSearchFocused(true)}>
+                <Search size={24} color="#1C1C1E" strokeWidth={2} />
+              </TouchableOpacity>
+              <TouchableOpacity>
+                <Settings size={24} color="#1C1C1E" strokeWidth={2} />
+              </TouchableOpacity>
+            </XStack>
+          </View>
+        ) : (
+          <View style={styles.searchHeader}>
+            <View style={styles.searchBarActive}>
+              <Search size={18} color="#8E8E93" strokeWidth={2} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search documents..."
+                placeholderTextColor="#8E8E93"
+                value={searchQuery}
+                onChangeText={handleSearch}
+                onSubmitEditing={handleSearchSubmit}
+                autoFocus
+                returnKeyType="search"
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setSearchQuery('')}>
+                  <View style={styles.clearButton}>
+                    <X size={14} color="#8E8E93" strokeWidth={2.5} />
+                  </View>
+                </TouchableOpacity>
               )}
-
-              {/* Prescriptions Tab */}
-              {activeTab === 'prescriptions' && (
-                <YStack gap="$3">
-                  {prescriptions.map((med) => {
-                    const isTaken = compliance[med.id] || false;
-                    return (
-                      <Card
-                        key={med.id}
-                        padding="$4"
-                        borderRadius="$9"
-                        backgroundColor="$muted"
-                        borderWidth={0}
-                      >
-                        <XStack alignItems="center" gap="$3">
-                          <Checkbox
-                            checked={isTaken}
-                            size="$5"
-                            borderColor="$blue10"
-                          >
-                            <Checkbox.Indicator>
-                              <Ionicons name="checkmark" size={16} color="#007AFF" />
-                            </Checkbox.Indicator>
-                          </Checkbox>
-                          <YStack flex={1} gap="$1">
-                            <Text fontSize="$5" fontWeight="700" color="$color">
-                              {med.name}
-                            </Text>
-                            <Text fontSize="$3" color="$color10">
-                              {med.dosage} • {med.frequency}
-                            </Text>
-                            <Progress
-                              value={isTaken ? 100 : 0}
-                              max={100}
-                              backgroundColor="$gray4"
-                              marginTop="$2"
-                            >
-                              <Progress.Indicator backgroundColor="$green10" />
-                            </Progress>
-                          </YStack>
-                          {isTaken && (
-                            <Ionicons name="checkmark-circle" size={24} color="#22C55E" />
-                          )}
-                        </XStack>
-                      </Card>
-                    );
-                  })}
-                </YStack>
-              )}
-
-              {/* Labs Tab */}
-              {activeTab === 'labs' && (
-                <YStack gap="$3">
-                  {timelineRecords
-                    .filter((r) => r.type === 'lab')
-                    .map((record) => (
-                      <Card
-                        key={record.id}
-                        padding="$4"
-                        borderRadius="$9"
-                        backgroundColor="$muted"
-                        borderWidth={0}
-                        pressStyle={{ opacity: 0.8, backgroundColor: '$background' }}
-                        onPress={() => navigation.navigate('RecordDetail', { id: record.id })}
-                      >
-                        <YStack gap="$3">
-                          <XStack alignItems="center" justifyContent="space-between">
-                            <Text fontSize="$5" fontWeight="700" color="$color">
-                              {record.title}
-                            </Text>
-                            <Text fontSize="$3" color="$color10">
-                              {new Date(record.date).toLocaleDateString()}
-                            </Text>
-                          </XStack>
-                          <XStack gap="$4">
-                            <YStack flex={1}>
-                              <Text fontSize="$2" color="$color10">Recent Analysis</Text>
-                              <Text fontSize="$4" fontWeight="700" color="$color" numberOfLines={1}>
-                                {record.summary || 'Normal results'}
-                              </Text>
-                            </YStack>
-                          </XStack>
-                        </YStack>
-                      </Card>
-                    ))}
-                </YStack>
-              )}
-            </YStack>
-          </RNScrollView>
-
-          {/* Floating Action Button - Add Record */}
-          <XStack
-            position="absolute"
-            bottom="$6"
-            right="$6"
-            zIndex={100}
-          >
-            <Button
-              size="$5"
-              borderRadius="$10"
-              backgroundColor="#3B82F6" // Apple blue
-              shadowColor="rgba(0,0,0,0.5)"
-              shadowOffset={{ width: 0, height: 4 }}
-              shadowOpacity={0.3}
-              shadowRadius={8}
-              elevation={8}
-              pressStyle={{ scale: 0.95, backgroundColor: '#2563EB' }}
-              onPress={handleUpload}
-              disabled={uploading}
-              icon={uploading ? <ActivityIndicator color="white" /> : <Ionicons name="add" size={24} color="white" />}
-              paddingHorizontal="$5"
-            >
-              <Text fontSize="$4" fontWeight="600" color="white">
-                {uploading ? 'Uploading...' : 'Add Record'}
+            </View>
+            <TouchableOpacity onPress={cancelSearch} style={styles.cancelButton}>
+              <Text fontSize={16} fontWeight="500" color="#007AFF">
+                Cancel
               </Text>
-            </Button>
-          </XStack>
-        </ResponsiveContainer>
-      </YStack>
-    </SafeAreaView>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <ScrollView 
+          style={{ flex: 1 }} 
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Recent Searches - Only show when search is focused */}
+          {isSearchFocused && searchQuery.length === 0 && recentSearches.length > 0 && (
+            <View style={styles.recentSearches}>
+              <Text fontSize={12} fontWeight="600" color="#8E8E93" letterSpacing={0.5}>
+                RECENT SEARCHES
+              </Text>
+              {recentSearches.map((search, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={styles.recentSearchItem}
+                  onPress={() => handleRecentSearchTap(search)}
+                >
+                  <Clock size={16} color="#8E8E93" strokeWidth={2} />
+                  <Text fontSize={15} color="#1C1C1E" marginLeft={12}>
+                    {search}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {/* Total Storage Header */}
+          {!isSearchFocused && (
+            <View style={styles.storageHeader}>
+              <Text fontSize={12} fontWeight="600" color="#8E8E93" letterSpacing={0.5}>
+                TOTAL STORAGE
+              </Text>
+              <Text fontSize={16} fontWeight="700" color="#007AFF">
+                {documentCards.length} Files
+              </Text>
+            </View>
+          )}
+
+          {/* Filter Tabs - Segmented Control Style */}
+          {!isSearchFocused && (
+            <View style={styles.filterWrapper}>
+              <View style={styles.filterContainer}>
+                {(['All', 'Medical', 'Results', 'Admin'] as FilterType[]).map((filter, index) => (
+                  <TouchableOpacity
+                    key={filter}
+                    style={[
+                      styles.filterTab,
+                      activeFilter === filter && styles.filterTabActive,
+                      index === 0 && styles.filterTabFirst,
+                      index === 3 && styles.filterTabLast,
+                    ]}
+                    onPress={() => {
+                      Haptics.selectionAsync();
+                      setActiveFilter(filter);
+                    }}
+                  >
+                    <Text
+                      fontSize={13}
+                      fontWeight="600"
+                      color={activeFilter === filter ? '#007AFF' : '#8E8E93'}
+                    >
+                      {filter} ({filterCounts[filter]})
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {/* Recent Uploads Section */}
+          {recentDocuments.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionHeader}>RECENT UPLOADS</Text>
+              {recentDocuments.map(doc => renderDocumentCard(doc, isSearchFocused && searchQuery.length > 0))}
+            </View>
+          )}
+
+          {/* Older Documents Section */}
+          {olderDocuments.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionHeader}>OLDER DOCUMENTS</Text>
+              {olderDocuments.map(doc => renderDocumentCard(doc, isSearchFocused && searchQuery.length > 0))}
+            </View>
+          )}
+
+          {/* Empty State */}
+          {filteredDocuments.length === 0 && (
+            <View style={styles.emptyState}>
+              <FileText size={48} color="#C7C7CC" strokeWidth={1.5} />
+              <Text fontSize={17} fontWeight="600" color="#1C1C1E" marginTop={16}>
+                No documents found
+              </Text>
+              <Text fontSize={14} color="#8E8E93" textAlign="center" marginTop={8}>
+                {searchQuery ? 'Try a different search term' : 'Upload your first document to get started'}
+              </Text>
+            </View>
+          )}
+        </ScrollView>
+
+        {/* Floating Action Button */}
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={handleUpload}
+          activeOpacity={0.9}
+        >
+          <Camera size={24} color="white" strokeWidth={2} />
+        </TouchableOpacity>
+      </SafeAreaView>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F8F9FA',
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F8F9FA',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 16,
+    backgroundColor: '#F8F9FA',
+  },
+  searchHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 16,
+    gap: 12,
+  },
+  searchBarActive: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 44,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#1C1C1E',
+    marginLeft: 8,
+    paddingVertical: 8,
+  },
+  clearButton: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#E5E5EA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelButton: {
+    paddingHorizontal: 4,
+  },
+  scrollContent: {
+    paddingBottom: 100,
+  },
+  recentSearches: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 16,
+  },
+  recentSearchItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  storageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    marginBottom: 16,
+  },
+  filterWrapper: {
+    paddingHorizontal: 20,
+    marginBottom: 24,
+  },
+  filterContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#F2F2F7',
+    borderRadius: 10,
+    padding: 4,
+  },
+  filterTab: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+  },
+  filterTabActive: {
+    backgroundColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  filterTabFirst: {
+    borderTopLeftRadius: 8,
+    borderBottomLeftRadius: 8,
+  },
+  filterTabLast: {
+    borderTopRightRadius: 8,
+    borderBottomRightRadius: 8,
+  },
+  section: {
+    paddingHorizontal: 20,
+    marginBottom: 24,
+  },
+  sectionHeader: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8E8E93',
+    letterSpacing: 0.5,
+    marginBottom: 12,
+  },
+  documentCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+  },
+  documentCardDimmed: {
+    opacity: 0.5,
+  },
+  thumbnail: {
+    width: 64,
+    height: 64,
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: '#F5F5F5',
+  },
+  thumbnailImage: {
+    width: '100%',
+    height: '100%',
+  },
+  thumbnailPlaceholder: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E3F2FD',
+  },
+  cardContent: {
+    flex: 1,
+    marginLeft: 12,
+    marginRight: 8,
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 40,
+  },
+  fab: {
+    position: 'absolute',
+    bottom: 24,
+    right: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+});

@@ -10,7 +10,7 @@ const { PDFParse } = require('pdf-parse');
  * Extract text from a dictionary-based PDF buffer
  */
 // Import Gemini OCR helper
-import { extractTextFromPdfWithGemini } from './gemini.js';
+import { extractTextFromPdfWithGemini, extractTextFromImageWithGemini } from './gemini.js';
 
 /**
  * Extract text from a dictionary-based PDF buffer
@@ -32,23 +32,22 @@ export async function extractTextFromPdf(pdfBuffer: Buffer): Promise<string> {
     }
 
     // 2. heuristic Quality Check: Is it likely garbage/scanned?
-    // - Length < 50 chars?
-    // - High density of unknown symbols vs letters? (Simple check: if < 40% alphanumeric)
-    // - or just "Empty"
     const cleanChars = text.replace(/[^a-zA-Z0-9\s]/g, '').length;
     const totalChars = text.length;
     const isQualityPoor = totalChars < 50 || (cleanChars / totalChars < 0.5) || text.includes('AHEEE') || text.includes('');
 
     if (isQualityPoor) {
-        console.log('[OCR] Standard PDF text quality is poor (likely scanned). Switching to Gemini OCR...');
+        console.log('[OCR] Standard PDF text quality is poor (likely scanned). Switching to Gemini OCR (Fallback)...');
         try {
+            // Note: Tesseract doesn't strictly support PDF buffers without conversion.
+            // Converting PDF -> Image requires extra heavy deps (canvas/sharp/poppler).
+            // So for PDFs, we default to Gemini Vision as the "OCR Engine" fallback.
             const ocrText = await extractTextFromPdfWithGemini(pdfBuffer);
             if (ocrText && ocrText.length > text.length) {
                 return normalizeText(ocrText);
             }
-        } catch (geminiError) {
-            console.error('Gemini OCR Fallback failed:', geminiError);
-            // Return original poor text if fallback fails
+        } catch (geminiError: any) {
+            console.error('Gemini PDF OCR Fallback failed:', geminiError.message);
         }
     }
 
@@ -59,9 +58,10 @@ export async function extractTextFromPdf(pdfBuffer: Buffer): Promise<string> {
  * Extract text from an image URL or buffer
  */
 export async function extractTextFromImage(
-    imageSource: string | Buffer
+    imageSource: string | Buffer,
+    mimeType: string = 'image/png'
 ): Promise<string> {
-    console.log('Starting OCR extraction...');
+    console.log('Starting OCR extraction (Tesseract)...');
 
     try {
         const result = await Tesseract.recognize(
@@ -69,20 +69,45 @@ export async function extractTextFromImage(
             'eng', // English language
             {
                 logger: (m) => {
-                    if (m.status === 'recognizing text') {
-                        console.log(`OCR progress: ${Math.round(m.progress * 100)}%`);
+                    // Only log every 20-30% to avoid spamming terminal
+                    if (m.status === 'recognizing text' && Math.round(m.progress * 100) % 20 === 0) {
+                        console.log(`[Tesseract] Progress: ${Math.round(m.progress * 100)}%`);
                     }
                 },
             }
         );
 
         const text = result.data.text;
-        console.log(`OCR extracted ${text.length} characters`);
+        console.log(`[Tesseract] extracted ${text.length} characters`);
+
+        // Check if Tesseract failed to read anything meaningful
+        if (!text || text.length < 10) {
+            throw new Error('Tesseract returned empty/low quality text.');
+        }
 
         return normalizeText(text);
-    } catch (error) {
-        console.error('OCR extraction failed:', error);
-        throw new Error(`OCR failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } catch (error: any) {
+        console.warn(`[Tesseract] Failed: ${error.message}. Switching to Gemini Fallback...`);
+        try {
+            // Handle Buffer vs String URL
+            let buffer: Buffer;
+            if (Buffer.isBuffer(imageSource)) {
+                buffer = imageSource;
+            } else {
+                // If it's a URL/Path, download/read it (simplified for now assuming Buffer mostly)
+                // For now, if string, we try to download if it's http
+                if (typeof imageSource === 'string' && imageSource.startsWith('http')) {
+                    buffer = await downloadFile(imageSource);
+                } else {
+                    throw new Error('Gemini fallback requires a Buffer or HTTP URL.');
+                }
+            }
+
+            return await extractTextFromImageWithGemini(buffer, mimeType);
+        } catch (geminiError: any) {
+            console.error('[OCR] All methods failed:', geminiError.message);
+            throw new Error('OCR Failed (Tesseract & Gemini)');
+        }
     }
 }
 

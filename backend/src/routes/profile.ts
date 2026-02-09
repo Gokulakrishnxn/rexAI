@@ -71,4 +71,34 @@ router.get('/', verifyFirebaseOnly as any, async (req: FirebaseRequest, res: Res
     }
 });
 
+/**
+ * GET /api/profile/activities
+ * Fetches recent activity logs
+ */
+router.get('/activities', verifyFirebaseOnly as any, async (req: FirebaseRequest, res: Response) => {
+    try {
+        const firebaseUser = req.firebaseUser!;
+
+        // Use Supabase Service Role to bypass RLS if needed, or just standard query via join
+        // First get the user ID
+        const { data: user } = await supabase.from('users').select('id').eq('firebase_uid', firebaseUser.uid).single();
+
+        if (!user) return res.json({ success: true, activities: [] });
+
+        const { data, error } = await supabase
+            .from('activity_logs')
+            .select('*')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false })
+            .limit(10);
+
+        if (error) throw error;
+
+        res.json({ success: true, activities: data });
+    } catch (error: any) {
+        console.error('[Backend] Fetch Activities Failed:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 export default router;

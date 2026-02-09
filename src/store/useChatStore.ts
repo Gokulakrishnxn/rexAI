@@ -5,6 +5,10 @@ export interface ChatMessage {
   text: string;
   userId: string;
   createdAt: Date;
+  context?: {
+    id: string;
+    title: string;
+  };
 }
 
 export interface ChatSession {

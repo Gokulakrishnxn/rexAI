@@ -61,11 +61,13 @@ export type IngestResponse = {
     summary?: string;
     chunkCount: number;
     error?: string;
+    reason?: string;
 };
 
 export type ChatRequest = {
     question: string;
     sessionId?: string;
+    documentId?: string;
 };
 
 export type ChatSession = {
@@ -97,9 +99,9 @@ export type ChatResponse = {
 /**
  * Trigger ingestion of an uploaded file
  */
-export const triggerIngestion = async (request: IngestRequest): Promise<IngestResponse> => {
+export const triggerIngestion = async (request: IngestRequest, mode: 'standard' | 'agentic' = 'agentic'): Promise<IngestResponse> => {
     try {
-        const url = `${getBackendUrl()}/api/ingest`;
+        const url = `${getBackendUrl()}/api/ingest${mode === 'agentic' ? '/agentic' : ''}`;
         console.log(`[BackendApi] Triggering ingestion at: ${url}`);
 
         const response = await fetch(url, {
@@ -226,6 +228,23 @@ export const createSession = async (title?: string): Promise<ChatSession | null>
 };
 
 /**
+ * Delete a chat session
+ */
+export const deleteSession = async (sessionId: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+        const response = await fetch(`${getBackendUrl()}/api/sessions/${sessionId}`, {
+            method: 'DELETE',
+            headers: await getHeaders(),
+        });
+        const data = await response.json();
+        return data;
+    } catch (error: any) {
+        console.error('Delete session error:', error);
+        return { success: false, error: 'Failed to delete session' };
+    }
+};
+
+/**
  * Get messages for a session
  */
 export const fetchSessionMessages = async (sessionId: string): Promise<ChatMessage[]> => {
@@ -255,6 +274,23 @@ export const fetchUserDocuments = async (): Promise<any[]> => {
         return [];
     }
 };
+/**
+ * Delete a user document (and chunks)
+ */
+export const deleteDocument = async (documentId: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+        const response = await fetch(`${getBackendUrl()}/api/ingest/${documentId}`, {
+            method: 'DELETE',
+            headers: await getHeaders(),
+        });
+        const data = await response.json();
+        return data;
+    } catch (error: any) {
+        console.error('Delete document error:', error);
+        return { success: false, error: 'Failed to delete document' };
+    }
+};
+
 /**
  * Onboard a new user (Create/Sync profile in Supabase via Backend)
  */
@@ -317,3 +353,155 @@ export const fetchUserProfile = async (token?: string): Promise<{ success: boole
         return { success: false, error: error.message };
     }
 };
+
+/**
+ * Analyze Document/Text for Medication (Medication Intelligence)
+ */
+export const analyzeMedication = async (payload: { text?: string; imageBase64?: string }): Promise<{ success: boolean; drafts?: any[]; error?: string }> => {
+    try {
+        const url = `${getBackendUrl()}/api/medication/analyze`;
+        const headers = await getHeaders();
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `HTTP ${response.status}`);
+        }
+
+        return await response.json();
+    } catch (error: any) {
+        console.error('Medication Analysis Error:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+/**
+ * Confirm and Save Medication Plan
+ */
+export const confirmMedicationPlan = async (medications: any[]): Promise<{ success: boolean; count?: number; error?: string }> => {
+    try {
+        const url = `${getBackendUrl()}/api/medication/confirm`;
+        const headers = await getHeaders();
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({ medications }),
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `HTTP ${response.status}`);
+        }
+
+        return await response.json();
+    } catch (error: any) {
+        console.error('Medication Confirmation Error:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+/**
+ * Mark Medication as Taken
+ */
+export const markMedicationTaken = async (medId: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+        const url = `${getBackendUrl()}/api/medication/${medId}/take`;
+        const headers = await getHeaders();
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: headers,
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `HTTP ${response.status}`);
+        }
+
+        return await response.json();
+    } catch (error: any) {
+        console.error('Mark Taken Error:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+/**
+ * Delete a medication from DB
+ */
+export const deleteMedication = async (medicationId: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+        const url = `${getBackendUrl()}/api/medication/${medicationId}`;
+        const headers = await getHeaders();
+
+        const response = await fetch(url, {
+            method: 'DELETE',
+            headers: headers,
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `HTTP ${response.status}`);
+        }
+
+        return { success: true };
+    } catch (error: any) {
+        console.error('Delete Medication Error:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+/**
+ * Fetch Medications List (Proxy)
+ */
+export const fetchMedicationsList = async (): Promise<{ success: boolean; medications?: any[]; error?: string }> => {
+    try {
+        const url = `${getBackendUrl()}/api/medication/list`;
+        const headers = await getHeaders();
+
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: headers,
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `HTTP ${response.status}`);
+        }
+
+        return await response.json();
+    } catch (error: any) {
+        console.error('Fetch Medications Error:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+/**
+ * Fetch Activity Logs (Proxy)
+ */
+export const fetchActivitiesList = async (): Promise<{ success: boolean; activities?: any[]; error?: string }> => {
+    try {
+        const url = `${getBackendUrl()}/api/profile/activities`;
+        const headers = await getHeaders();
+
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: headers,
+        });
+
+        if (!response.ok) {
+            return { success: false, error: `HTTP ${response.status}` };
+        }
+
+        return await response.json();
+    } catch (error: any) {
+        console.error('Fetch Activities Error:', error);
+        return { success: false, error: error.message };
+    }
+};
+

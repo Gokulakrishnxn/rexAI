@@ -114,7 +114,8 @@ export async function searchSimilarChunks(
     userId: string,
     queryEmbedding: number[],
     topK: number = 8,
-    similarityThreshold: number = 0.5
+    similarityThreshold: number = 0.5,
+    filterDocumentId: string | null = null
 ): Promise<SimilarChunk[]> {
     // Use Supabase RPC for vector similarity search
     const { data, error } = await supabase.rpc('match_document_chunks', {
@@ -122,12 +123,13 @@ export async function searchSimilarChunks(
         match_user_id: userId,
         match_count: topK,
         similarity_threshold: similarityThreshold,
+        filter_document_id: filterDocumentId,
     });
 
     if (error) {
         // If the RPC doesn't exist, fall back to manual query
         console.warn('RPC not available, using fallback query:', error.message);
-        return fallbackSimilaritySearch(userId, queryEmbedding, topK);
+        return fallbackSimilaritySearch(userId, queryEmbedding, topK, filterDocumentId);
     }
 
     return data || [];
@@ -139,15 +141,21 @@ export async function searchSimilarChunks(
 async function fallbackSimilaritySearch(
     userId: string,
     queryEmbedding: number[],
-    topK: number
+    topK: number,
+    filterDocumentId: string | null
 ): Promise<SimilarChunk[]> {
     const embeddingStr = `[${queryEmbedding.join(',')}]`;
 
-    const { data, error } = await supabase
+    let query = supabase
         .from('document_chunks')
         .select('id, document_id, chunk_index, content')
-        .eq('user_id', userId)
-        .limit(topK * 2); // Get more and filter client-side
+        .eq('user_id', userId);
+
+    if (filterDocumentId) {
+        query = query.eq('document_id', filterDocumentId);
+    }
+
+    const { data, error } = await query.limit(topK * 2); // Get more and filter client-side
 
     if (error) {
         throw new Error(`Similarity search failed: ${error.message}`);

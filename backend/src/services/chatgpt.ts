@@ -70,7 +70,7 @@ export async function generateSummary(text: string): Promise<string> {
 
     try {
         const response = await openai.chat.completions.create({
-            model: 'gpt-3.5-turbo',
+            model: 'gpt-4o',
             messages: [
                 {
                     role: 'system',
@@ -139,7 +139,7 @@ ${question}
         });
 
         const response = await openai.chat.completions.create({
-            model: 'gpt-3.5-turbo',
+            model: 'gpt-4o',
             messages,
             temperature: 0.4,
             max_tokens: 1000,
@@ -191,7 +191,7 @@ ${question} `,
         });
 
         const stream = await openai.chat.completions.create({
-            model: 'gpt-3.5-turbo',
+            model: 'gpt-4o',
             messages,
             temperature: 0.4,
             max_tokens: 1000,

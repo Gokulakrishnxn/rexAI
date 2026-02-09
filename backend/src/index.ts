@@ -8,6 +8,7 @@ import dotenv from 'dotenv';
 import express from 'express';
 import chatRouter from './routes/chat.js';
 import ingestRouter from './routes/ingest.js';
+import medicationRoutes from './routes/medication.js'; // [NEW]
 import sessionsRouter from './routes/sessions.js';
 import profileRouter from './routes/profile.js';
 import { initEmbeddings } from './services/embeddings.js';
@@ -29,9 +30,15 @@ app.get('/health', (req, res) => {
 
 // API Routes
 app.use('/api/ingest', ingestRouter);
+app.use('/api/medication', medicationRoutes); // [NEW]
 app.use('/api/chat', chatRouter);
 app.use('/api/sessions', sessionsRouter);
 app.use('/api/profile', profileRouter);
+
+// Advanced Ingestion (Hybrid)
+import ingestAdvancedRouter from './routes/ingestAdvanced.js';
+app.use('/api/ingest', ingestAdvancedRouter); // Mounts at /api/ingest/agentic via router definition? No, wait.
+// If ingestAdvancedRouter is router.post('/agentic', ...), then mounting at /api/ingest makes it /api/ingest/agentic. Correct.
 
 // Error handling
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {

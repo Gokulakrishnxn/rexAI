@@ -1,8 +1,8 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { GiftedChat, IMessage, InputToolbar, Bubble, Send, Composer } from 'react-native-gifted-chat';
-import { useNavigation } from '@react-navigation/native';
+import { GiftedChat, IMessage, InputToolbar, Bubble, Send, Composer, MessageText } from 'react-native-gifted-chat';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import {
@@ -21,26 +21,33 @@ import { useChatStore, ChatSession } from '../../store/useChatStore';
 import { useRecordsStore } from '../../store/useRecordsStore';
 import { CustomMessageBubble } from '../../components/chat/CustomMessageBubble';
 import { ResponsiveContainer } from '@/components/ui/ResponsiveContainer';
-import { sendChatMessage, createSession, fetchSessions, fetchSessionMessages } from '@/services/api/backendApi';
+import { sendChatMessage, createSession, fetchSessions, fetchSessionMessages, deleteSession } from '@/services/api/backendApi';
 import { useAuthStore } from '../../store/useAuthStore';
-import { ActivityIndicator, Dimensions } from 'react-native';
+import { ActivityIndicator, Dimensions, Alert, View } from 'react-native';
 import { HealthScoreGraph } from '@/components/chat/HealthScoreGraph';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 
 export function CoachChatScreen() {
+  const route = useRoute<RouteProp<RootStackParamList, 'CoachChat'>>();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { chats, currentChatId, addMessage, createNewChat, switchChat, deleteChat } = useChatStore();
-  const { records } = useRecordsStore();
+  const { records, fetchRecords } = useRecordsStore();
   const [openHistory, setOpenHistory] = useState(false);
   const [inputText, setInputText] = useState('');
   const [mentionQuery, setMentionQuery] = useState('');
   const [showMentions, setShowMentions] = useState(false);
+  const [contextFile, setContextFile] = useState<{ id: string; title: string } | null>(null);
   const [isTyping, setIsTyping] = useState(false);
   const { user: profile } = useAuthStore();
   const { updateChat } = useChatStore();
   const USER_ID = profile?.id;
+
+  // Fetch records for mention list
+  React.useEffect(() => {
+    fetchRecords();
+  }, []);
 
   // Get current active chat
   const currentChat = useMemo(() => {
@@ -67,7 +74,8 @@ export function CoachChatScreen() {
           // Switch to most recent
           switchChat(formattedSessions[0].id);
         } else {
-          // If no sessions, create one
+          // If no sessions, CLEAR existing chats and create one
+          setChats([]);
           handleNewChat();
         }
       } catch (error) {
@@ -105,10 +113,47 @@ export function CoachChatScreen() {
     setOpenHistory(false);
   };
 
+  const handleDeleteChat = async (chatId: string) => {
+    Alert.alert(
+      "Delete Chat",
+      "Are you sure you want to delete this conversation?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            // Optimistic update
+            deleteChat(chatId);
 
+            // Call backend
+            const result = await deleteSession(chatId);
+            if (!result.success) {
+              console.error('Failed to delete chat session on backend:', result.error);
+              // Ideally we should rollback or show error toast, but store is already updated.
+            }
+
+            // If no chats left, create new one
+            if (chats.length <= 1) { // checking length before delete takes effect fully in re-render context?
+              // deleteChat handles currentChatId logic. If empty, we might need to trigger new chat manually if not handled.
+              // deleteChat logic: s.chats.filter(c => c.id !== id).
+              // If resulting chats is empty...
+            }
+          }
+        }
+      ]
+    );
+  };
+
+
+  // ... (keep onSend logic but update message creation)
   const onSend = useCallback(async (newMessages: IMessage[] = []) => {
     if (newMessages.length > 0 && currentChatId && currentChat) {
       const msg = newMessages[0];
+      const sentContext = contextFile ? { id: contextFile.id, title: contextFile.title } : undefined;
+
+      // Clear context immediately after sending
+      setContextFile(null);
 
       // Add user message locally
       addMessage(currentChatId, {
@@ -116,14 +161,14 @@ export function CoachChatScreen() {
         text: msg.text,
         userId: 'user',
         createdAt: new Date(),
+        context: sentContext // Store context in message
       });
 
       setIsTyping(true);
 
       try {
         let backendSessionId = currentChat.backendSessionId;
-
-        // Create backend session if it doesn't exist
+        // ... (session creation logic same as before)
         if (!backendSessionId) {
           const session = await createSession(msg.text.substring(0, 30));
           if (session) {
@@ -135,10 +180,12 @@ export function CoachChatScreen() {
         // Send to backend RAG
         const chatResponse = await sendChatMessage({
           question: msg.text,
-          sessionId: backendSessionId
+          sessionId: backendSessionId,
+          documentId: sentContext?.id // Use captured context
         });
 
         if (chatResponse.success) {
+          // ... (success logic same)
           addMessage(currentChatId, {
             id: Date.now().toString(),
             text: chatResponse.answer,
@@ -146,6 +193,7 @@ export function CoachChatScreen() {
             createdAt: new Date(),
           });
         } else {
+          // ... (error logic same)
           addMessage(currentChatId, {
             id: Date.now().toString(),
             text: "Sorry, I encountered an error: " + (chatResponse.error || "Unknown error"),
@@ -154,6 +202,7 @@ export function CoachChatScreen() {
           });
         }
       } catch (error: any) {
+        // ... (catch logic same)
         addMessage(currentChatId, {
           id: Date.now().toString(),
           text: "I'm having trouble connecting to my brain. Please try again later.",
@@ -164,38 +213,60 @@ export function CoachChatScreen() {
         setIsTyping(false);
       }
     }
-  }, [addMessage, currentChatId, currentChat, USER_ID, updateChat]);
-
+  }, [addMessage, currentChatId, currentChat, USER_ID, updateChat, contextFile]); // Added contextFile dependency
 
   const renderBubble = (props: any) => {
+    const { currentMessage } = props;
     return (
-      <Bubble
-        {...props}
-        wrapperStyle={{
-          right: {
-            backgroundColor: '#007AFF',
-            borderRadius: 18,
-            paddingHorizontal: 12,
-            paddingVertical: 8,
-          },
-          left: {
-            backgroundColor: '#1C1C1E',
-            borderRadius: 18,
-            paddingHorizontal: 12,
-            paddingVertical: 8,
-          },
-        }}
-        textStyle={{
-          right: {
-            color: 'white',
-            fontSize: 15,
-          },
-          left: {
-            color: '#FFFFFF',
-            fontSize: 15,
-          },
-        }}
-      />
+      <YStack>
+        {currentMessage.context && (
+          <XStack
+            backgroundColor="#2C2C2E"
+            paddingHorizontal="$2"
+            paddingVertical="$1"
+            borderRadius="$2"
+            alignSelf={currentMessage.user._id === 'user' ? 'flex-end' : 'flex-start'}
+            marginBottom="$1"
+            marginRight={currentMessage.user._id === 'user' ? 8 : 0}
+            marginLeft={currentMessage.user._id === 'user' ? 0 : 8}
+            maxWidth={200}
+          >
+            <Ionicons name="document-text" size={10} color="#8E8E93" style={{ marginRight: 4 }} />
+            <Text color="#8E8E93" fontSize={10} numberOfLines={1}>
+              {currentMessage.context.title}
+            </Text>
+          </XStack>
+        )}
+        <Bubble
+          {...props}
+          wrapperStyle={{
+            right: {
+              backgroundColor: '#007AFF',
+              borderRadius: 18,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+            },
+            left: {
+              backgroundColor: 'white',
+              borderWidth: 1,
+              borderColor: '#E5E5EA',
+              borderRadius: 18,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+            },
+          }}
+          textStyle={{
+            right: {
+              color: 'white',
+              fontSize: 15,
+            },
+            left: {
+              color: '#000000',
+              fontSize: 15,
+            },
+          }}
+        />
+      </YStack>
     );
   };
 
@@ -210,11 +281,12 @@ export function CoachChatScreen() {
     }
   };
 
-  const insertMention = (recordTitle: string) => {
+  const insertMention = (record: { id: string; title: string }) => {
     const words = inputText.split(' ');
     words.pop(); // Remove the '@query'
-    const newText = [...words, `@${recordTitle} `].join(' ');
+    const newText = words.join(' ');
     setInputText(newText);
+    setContextFile({ id: record.id, title: record.title });
     setShowMentions(false);
   };
 
@@ -223,8 +295,44 @@ export function CoachChatScreen() {
   }, [records, mentionQuery]);
 
   const renderInputToolbar = (props: any) => {
+    // Truncate title logic
+    const truncateTitle = (title: string) => {
+      if (title.length > 6) {
+        return title.substring(0, 3) + '...';
+      }
+      return title;
+    };
+
     return (
       <YStack>
+        {/* Context Chip */}
+        {contextFile && (
+          <XStack
+            position="absolute"
+            bottom={55}
+            left={12}
+            backgroundColor="#2C2C2E"
+            paddingVertical="$1"
+            paddingHorizontal="$3"
+            borderRadius="$4"
+            borderColor="#1ef33aff"
+            borderWidth={1}
+            alignItems="center"
+            gap="$2"
+            zIndex={10}
+          >
+            <Ionicons name="document-text" size={14} color="#3B82F6" />
+            <Text color="white" fontSize="$3">Context: {truncateTitle(contextFile.title)}</Text>
+            <Button
+              size="$1"
+              circular
+              chromeless
+              onPress={() => setContextFile(null)}
+              icon={<Ionicons name="close" size={14} color="#8E8E93" />}
+            />
+          </XStack>
+        )}
+
         {showMentions && filteredRecords.length > 0 && (
           <XStack
             backgroundColor="#1C1C1E"
@@ -249,7 +357,7 @@ export function CoachChatScreen() {
                     backgroundColor="transparent"
                     paddingVertical="$2"
                     paddingHorizontal="$3"
-                    onPress={() => insertMention(record.title)}
+                    onPress={() => insertMention(record)}
                     justifyContent="flex-start"
                   >
                     <XStack gap="$3" alignItems="center">
@@ -272,7 +380,7 @@ export function CoachChatScreen() {
         <InputToolbar
           {...props}
           containerStyle={{
-            backgroundColor: '#000000',
+            backgroundColor: '#F2F2F7',
             borderTopWidth: 0,
             paddingHorizontal: 8,
             paddingBottom: 8,
@@ -346,6 +454,30 @@ export function CoachChatScreen() {
     );
   };
 
+  const renderAvatar = (props: any) => {
+    const { currentMessage } = props;
+    const isUser = currentMessage.user._id === 'user';
+
+    return (
+      <YStack
+        width={36}
+        height={36}
+        borderRadius={18}
+        backgroundColor={isUser ? '#007AFF' : '#34C759'} // User Blue, Bot Green
+        alignItems="center"
+        justifyContent="center"
+        marginRight={8}
+        marginLeft={8}
+      >
+        <Ionicons
+          name={isUser ? "person" : "medical"}
+          size={20}
+          color="white"
+        />
+      </YStack>
+    );
+  };
+
   const renderCustomView = (props: any) => {
     const { currentMessage } = props;
     if (!currentMessage?.text) return null;
@@ -382,7 +514,7 @@ export function CoachChatScreen() {
 
 
         return (
-          <YStack padding="$2" width={SCREEN_WIDTH * 0.9} alignSelf="center">
+          <YStack padding="$2" width={SCREEN_WIDTH * 0.75} alignSelf="center">
             <HealthScoreGraph data={data.data} />
           </YStack>
         );
@@ -425,8 +557,9 @@ export function CoachChatScreen() {
         user: {
           _id: msg.userId,
           name: msg.userId === 'user' ? 'You' : 'Rex.ai',
-          avatar: msg.userId === 'user' ? undefined : '🦖',
+          // avatar: msg.userId === 'user' ? undefined : '🦖', // Removed manual emoji avatar, using renderAvatar
         },
+        context: msg.context // Pass context to GiftedChat message
       };
     });
   }, [currentChat?.messages]);
@@ -438,18 +571,155 @@ export function CoachChatScreen() {
     if (!cleanText) return null; // If text was only JSON
 
     // Use default MessageText but with cleaned text
-    const { MessageText } = require('react-native-gifted-chat');
     return <MessageText {...props} currentMessage={{ ...currentMessage, text: cleanText }} />;
   };
 
+  // Empty Chat Component
+  const renderChatEmpty = () => {
+    return (
+      <View style={{ flex: 1, transform: [{ rotate: '180deg' }] }}>
+        <YStack
+          flex={1}
+          alignItems="center"
+          justifyContent="center"
+          padding="$6"
+        >
+          <YStack
+            width={100}
+            height={100}
+            borderRadius={50}
+            backgroundColor="#2C2C2E"
+            alignItems="center"
+            justifyContent="center"
+            marginBottom="$5"
+            borderWidth={1}
+            borderColor="#3A3A3C"
+          >
+            <Ionicons name="chatbubbles" size={48} color="#007AFF" />
+          </YStack>
+
+          <Text fontSize="$9" fontWeight="800" color="white" textAlign="center" marginBottom="$2">
+            Rex.ai
+          </Text>
+          <Text fontSize="$4" color="#8E8E93" textAlign="center" marginBottom="$6" paddingHorizontal="$4">
+            Your personal health assistant. Analyze records, get insights, or just chat.
+          </Text>
+
+          {/* Suggestions Grid */}
+          <YStack gap="$3" width="100%">
+            <XStack gap="$3" width="100%">
+              <Button
+                flex={1}
+                backgroundColor="white"
+                borderColor="#E5E5EA"
+                borderWidth={1}
+                borderRadius="$4"
+                pressStyle={{ backgroundColor: '#F5F5F5' }}
+                height={100}
+                onPress={() => setInputText("Analyze my blood report")}
+                flexDirection="column"
+                alignItems="center"
+                justifyContent="center"
+                padding="$2"
+              >
+                <YStack
+                  width={32} height={32} borderRadius={16}
+                  backgroundColor="rgba(59, 130, 246, 0.2)"
+                  alignItems="center" justifyContent="center" marginBottom="$2"
+                >
+                  <Ionicons name="flask" size={18} color="#3B82F6" />
+                </YStack>
+                <Text color="#000000" fontSize="$3" textAlign="center" numberOfLines={2}>Summarize Records</Text>
+              </Button>
+
+              <Button
+                flex={1}
+                backgroundColor="white"
+                borderColor="#E5E5EA"
+                borderWidth={1}
+                borderRadius="$4"
+                pressStyle={{ backgroundColor: '#F5F5F5' }}
+                height={100}
+                onPress={() => setInputText("Explain this prescription")}
+                flexDirection="column"
+                alignItems="center"
+                justifyContent="center"
+                padding="$2"
+              >
+                <YStack
+                  width={32} height={32} borderRadius={16}
+                  backgroundColor="rgba(52, 199, 89, 0.2)"
+                  alignItems="center" justifyContent="center" marginBottom="$2"
+                >
+                  <Ionicons name="medical" size={18} color="#34C759" />
+                </YStack>
+                <Text color="#000000" fontSize="$3" textAlign="center" numberOfLines={2}>Explain Meds</Text>
+              </Button>
+            </XStack>
+
+            <XStack gap="$3" width="100%">
+              <Button
+                flex={1}
+                backgroundColor="white"
+                borderColor="#E5E5EA"
+                borderWidth={1}
+                borderRadius="$4"
+                pressStyle={{ backgroundColor: '#F5F5F5' }}
+                height={100}
+                onPress={() => setInputText("What do these results mean?")}
+                flexDirection="column"
+                alignItems="center"
+                justifyContent="center"
+                padding="$2"
+              >
+                <YStack
+                  width={32} height={32} borderRadius={16}
+                  backgroundColor="rgba(255, 149, 0, 0.2)"
+                  alignItems="center" justifyContent="center" marginBottom="$2"
+                >
+                  <Ionicons name="pulse" size={18} color="#FF9500" />
+                </YStack>
+                <Text color="#000000" fontSize="$3" textAlign="center" numberOfLines={2}>Health Insights</Text>
+              </Button>
+
+              <Button
+                flex={1}
+                backgroundColor="white"
+                borderColor="#E5E5EA"
+                borderWidth={1}
+                borderRadius="$4"
+                pressStyle={{ backgroundColor: '#F5F5F5' }}
+                height={100}
+                onPress={() => setInputText("Suggest a diet plan")}
+                flexDirection="column"
+                alignItems="center"
+                justifyContent="center"
+                padding="$2"
+              >
+                <YStack
+                  width={32} height={32} borderRadius={16}
+                  backgroundColor="rgba(175, 82, 222, 0.2)"
+                  alignItems="center" justifyContent="center" marginBottom="$2"
+                >
+                  <Ionicons name="nutrition" size={18} color="#AF52DE" />
+                </YStack>
+                <Text color="#000000" fontSize="$3" textAlign="center" numberOfLines={2}>Diet Plan</Text>
+              </Button>
+            </XStack>
+          </YStack>
+        </YStack>
+      </View>
+    );
+  };
+
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#000000' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#F2F2F7' }}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
-        <YStack flex={1} backgroundColor="#000000">
+        <YStack flex={1} backgroundColor="#F2F2F7">
           {/* Header */}
           <XStack
             paddingHorizontal="$4"
@@ -463,9 +733,9 @@ export function CoachChatScreen() {
               circular
               chromeless
               onPress={() => setOpenHistory(true)}
-              icon={<Ionicons name="menu" size={24} color="white" />}
+              icon={<Ionicons name="menu" size={24} color="#000000" />}
             />
-            <Text fontSize="$5" fontWeight="600" color="white">
+            <Text fontSize="$5" fontWeight="600" color="#000000">
               {currentChat?.title === 'New Chat' ? 'Rex.ai' : currentChat?.title}
             </Text>
             <Button
@@ -473,36 +743,16 @@ export function CoachChatScreen() {
               circular
               chromeless
               onPress={() => createNewChat()}
-              icon={<Ionicons name="create-outline" size={24} color="white" />}
+              icon={<Ionicons name="create-outline" size={24} color="#000000" />}
             />
           </XStack>
 
-          <Separator borderColor="#1C1C1E" />
+          <Separator borderColor="#E5E5EA" />
 
           {/* Chat Area */}
           <YStack flex={1} position="relative">
             <ResponsiveContainer>
-              {(!currentChat || currentChat.messages.length === 0) && (
-                <YStack
-                  position="absolute"
-                  top={0}
-                  left={0}
-                  right={0}
-                  bottom={0}
-                  alignItems="center"
-                  justifyContent="center"
-                  zIndex={0}
-                  gap="$4"
-                  padding="$6"
-                >
-                  <Text fontSize="$9" fontWeight="800" color="white" textAlign="center">
-                    Start a conversation
-                  </Text>
-                  <Text fontSize="$4" color="#8E8E93" textAlign="center">
-                    Ask me anything, and I'll do my best to help.
-                  </Text>
-                </YStack>
-              )}
+              {/* Removed absolute empty view, using renderChatEmpty instead */}
 
               <GiftedChat
                 messages={giftedMessages}
@@ -518,6 +768,10 @@ export function CoachChatScreen() {
                 renderSend={renderSend}
                 renderCustomView={renderCustomView}
                 renderMessageText={renderMessageText}
+                renderAvatar={renderAvatar}
+                renderChatEmpty={renderChatEmpty} // Add empty state
+
+
                 textInputProps={{
                   placeholder: "Ask a question...",
                   onChangeText: onInputTextChanged,
@@ -526,7 +780,7 @@ export function CoachChatScreen() {
                 minInputToolbarHeight={70}
                 isTyping={isTyping}
                 messagesContainerStyle={{
-                  backgroundColor: '#000000',
+                  backgroundColor: '#F2F2F7',
                   paddingBottom: 20,
                 }}
               />
@@ -594,7 +848,7 @@ export function CoachChatScreen() {
                       borderWidth={currentChatId === chat.id ? 1 : 0}
                       borderColor="$blue10"
                     >
-                      <XStack gap="$3" alignItems="center">
+                      <XStack gap="$3" alignItems="center" flex={1}>
                         <Ionicons
                           name="chatbubble-ellipses-outline"
                           size={20}
@@ -608,6 +862,16 @@ export function CoachChatScreen() {
                             {new Date(chat.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                           </Text>
                         </YStack>
+                        <Button
+                          size="$2"
+                          circular
+                          chromeless
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            handleDeleteChat(chat.id);
+                          }}
+                          icon={<Ionicons name="trash-outline" size={18} color="#FF453A" />}
+                        />
                       </XStack>
                     </Card>
                   ))}
