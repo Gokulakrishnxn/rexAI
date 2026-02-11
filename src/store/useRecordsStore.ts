@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { HealthRecord } from '../../types/record';
 import type { Medication } from '../../types/medication';
+import { fetchUserDocuments } from '../services/api/backendApi';
 
 interface RecordsState {
   records: HealthRecord[];
@@ -11,38 +12,11 @@ interface RecordsState {
   updateRecord: (id: string, updates: Partial<HealthRecord>) => void;
   removeRecord: (id: string) => void;
   markTaken: (id: string) => void;
+  fetchRecords: () => Promise<void>;
 }
 
 export const useRecordsStore = create<RecordsState>((set) => ({
-  records: [
-    {
-      id: '1',
-      type: 'lab',
-      title: 'Blood Test - CBC',
-      date: '2024-01-20',
-      summary: 'Normal results for all parameters.',
-      doctor: 'Dr. Smith',
-      ingestionStatus: 'complete',
-    },
-    {
-      id: '2',
-      type: 'prescription',
-      title: 'Amoxicillin 500mg',
-      date: '2024-01-22',
-      summary: 'Take one tablet twice a day for 7 days.',
-      doctor: 'Dr. Jones',
-      ingestionStatus: 'complete',
-    },
-    {
-      id: '3',
-      type: 'imaging',
-      title: 'Chest X-Ray',
-      date: '2024-01-25',
-      summary: 'Clear lungs, no abnormalities detected.',
-      doctor: 'Dr. Wilson',
-      ingestionStatus: 'complete',
-    }
-  ],
+  records: [], // Default to empty
   activeMeds: [],
   compliance: {},
   setRecords: (records) => set({ records }),
@@ -56,4 +30,23 @@ export const useRecordsStore = create<RecordsState>((set) => ({
   markTaken: (id) => set((s) => ({
     compliance: { ...s.compliance, [id]: !s.compliance[id] }
   })),
+  fetchRecords: async () => {
+    const docs = await fetchUserDocuments();
+    if (docs) {
+      // Map backend docs to HealthRecord shape
+      const formatted: HealthRecord[] = docs.map((d: any) => ({
+        id: d.id,
+        type: d.doc_category || 'other', // Use the new category
+        title: d.file_name,
+        date: new Date(d.created_at).toISOString().split('T')[0],
+        summary: d.summary || 'No summary available',
+        rawText: d.extracted_text, // Include extracted text for AI analysis
+        doctor: 'Unknown', // Backend doesn't store this yet
+        ingestionStatus: d.validation_status === 'verified' ? 'complete' : 'pending',
+        supabaseUrl: d.file_url,
+        documentId: d.id,
+      }));
+      set({ records: formatted });
+    }
+  }
 }));

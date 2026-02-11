@@ -14,6 +14,9 @@ interface UserProfile {
   blood_group?: string;
   allergies?: string[];
   emergency_contact?: string;
+  height?: number;
+  weight?: number;
+  avatar_url?: string;
 }
 
 interface AuthState {

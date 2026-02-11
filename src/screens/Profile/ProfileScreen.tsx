@@ -1,61 +1,72 @@
-import React, { useState } from 'react';
-import { Alert } from 'react-native';
+import React from 'react';
+import { Alert, TouchableOpacity, View, StyleSheet } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import Animated from 'react-native-reanimated';
-import { useEntranceAnimation } from '../../hooks/useEntranceAnimation';
-import { ScrollView } from '@/components/ui/scroll-view';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   YStack,
   XStack,
   Card,
   Text,
-  Button,
-  Accordion,
-  Switch,
-  Dialog,
+  ScrollView,
 } from 'tamagui';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { ResponsiveContainer } from '@/components/ui/ResponsiveContainer';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useMedAgentStore } from '../../store/useMedAgentStore';
-import { useQRStore } from '../../store/useQRStore';
-import { QRDisplay } from '../../components/qr/QRDisplay';
-import { generateQRData } from '../../services/qrService';
+import { ProfileStackParamList } from '../../navigation/stacks/ProfileStack';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+
+type NavigationProp = NativeStackNavigationProp<ProfileStackParamList>;
+
+interface MenuItemProps {
+  icon: keyof typeof Ionicons.glyphMap;
+  iconBgColor: string;
+  iconColor: string;
+  title: string;
+  subtitle: string;
+  onPress?: () => void;
+  showBorder?: boolean;
+}
+
+function MenuItem({ icon, iconBgColor, iconColor, title, subtitle, onPress, showBorder = true }: MenuItemProps) {
+  return (
+    <TouchableOpacity 
+      onPress={onPress}
+      activeOpacity={0.7}
+      style={[
+        styles.menuItem,
+        showBorder && styles.menuItemBorder
+      ]}
+    >
+      <View style={[styles.iconContainer, { backgroundColor: iconBgColor }]}>
+        <Ionicons name={icon} size={20} color={iconColor} />
+      </View>
+      <View style={styles.menuTextContainer}>
+        <Text style={styles.menuTitle}>{title}</Text>
+        <Text style={styles.menuSubtitle}>{subtitle}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+    </TouchableOpacity>
+  );
+}
 
 export function ProfileScreen() {
-  const { user: profile } = useAuthStore();
+  const navigation = useNavigation<NavigationProp>();
+  const { user: profile, signOut } = useAuthStore();
   const { activeMeds } = useMedAgentStore();
-  const { currentQR, setCurrentQR } = useQRStore();
-  const { signOut } = useAuthStore();
-  const [showRegenerateDialog, setShowRegenerateDialog] = useState(false);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [dataSyncEnabled, setDataSyncEnabled] = useState(true);
-
-  // Generate QR codes
-  const emergencyQR = currentQR?.fullUrl || (profile ? generateQRData(profile).fullUrl : '');
-  const fullRecordsQR = emergencyQR; // In real app, this would be different
-
-  const handleRegenerateQR = () => {
-    if (profile) {
-      const newQR = generateQRData(profile);
-      setCurrentQR(newQR);
-      setShowRegenerateDialog(false);
-      Alert.alert('Success', 'QR codes regenerated successfully');
-    }
-  };
 
   const handleLogout = () => {
     Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
+      'Log Out',
+      'Are you sure you want to log out?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Logout',
+          text: 'Log Out',
           style: 'destructive',
           onPress: () => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             signOut();
           },
         },
@@ -63,433 +74,327 @@ export function ProfileScreen() {
     );
   };
 
+  const handleNavigateToMedications = () => {
+    Haptics.selectionAsync();
+    navigation.navigate('MedicationLibrary');
+  };
+
+  const handleNavigateToQR = () => {
+    Haptics.selectionAsync();
+    navigation.navigate('QRManagement');
+  };
+
+  // Calculate prescription count
+  const prescriptionCount = activeMeds.length;
+
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#000000' }}>
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: 32 }}
+    <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <XStack alignItems="center" paddingHorizontal="$4" paddingVertical="$3">
+        <TouchableOpacity 
+          onPress={() => navigation.goBack()}
+          style={styles.backButton}
+        >
+          <Ionicons name="chevron-back" size={24} color="#1A1A1A" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>My Profile</Text>
+        <View style={{ width: 40 }} />
+      </XStack>
+
+      <ScrollView 
+        style={{ flex: 1 }} 
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <ResponsiveContainer maxWidth={1000}>
-          <YStack padding="$4" gap="$6">
-            {/* Profile Header */}
-            <Animated.View style={useEntranceAnimation(0, 100)}>
-              <Card
-                padding="$5"
-                borderRadius="$9"
-                backgroundColor="$background"
-              >
-                <XStack alignItems="center" gap="$4">
-                  <Avatar size={64}>
-                    <AvatarImage source={{ uri: undefined }} />
-                    <AvatarFallback>
-                      {profile?.name?.charAt(0).toUpperCase() || 'U'}
-                    </AvatarFallback>
-                  </Avatar>
-                  <YStack flex={1} gap="$1">
-                    <Text fontSize="$7" fontWeight="700" color="$color">
-                      {profile?.name || 'User'}
-                    </Text>
-                    <Text fontSize="$4" color="$color10">
-                      {profile?.blood_group ? `Health ID: ${profile.blood_group}` : 'No Health ID set'}
-                    </Text>
-                  </YStack>
-                  <Button
-                    size="$3"
-                    borderRadius="$4"
-                    backgroundColor="transparent"
-                    icon={<Ionicons name="pencil" size={16} color="#64748B" />}
-                  >
-                    <Text fontSize="$3" color="$color">
-                      Edit
-                    </Text>
-                  </Button>
-                </XStack>
-              </Card>
-            </Animated.View>
+        {/* Profile Header */}
+        <YStack alignItems="center" paddingTop="$4" paddingBottom="$6">
+          <Avatar size={100} style={styles.avatar}>
+            <AvatarImage source={{ uri: profile?.avatar_url }} />
+            <AvatarFallback style={styles.avatarFallback}>
+              <Text style={styles.avatarText}>
+                {profile?.name?.charAt(0).toUpperCase() || 'U'}
+              </Text>
+            </AvatarFallback>
+          </Avatar>
+          
+          <Text style={styles.userName}>{profile?.name || 'User'}</Text>
+          
+          <XStack alignItems="center" gap="$3" marginTop="$2">
+            {profile?.blood_group && (
+              <View style={styles.bloodTypeBadge}>
+                <Text style={styles.bloodTypeText}>{profile.blood_group}</Text>
+              </View>
+            )}
+            <Text style={styles.emailText}>{profile?.email || 'email@example.com'}</Text>
+          </XStack>
+        </YStack>
 
-            {/* Personal Info Card */}
-            <Animated.View style={useEntranceAnimation(1, 100)}>
-              <Card
-                padding="$4"
-                borderRadius="$8"
-                backgroundColor="$background"
-                pressStyle={{ opacity: 0.8 }}
-                onPress={() => Haptics.selectionAsync()}
-              >
-                <XStack alignItems="center" justifyContent="space-between">
-                  <YStack gap="$2">
-                    <Text fontSize="$5" fontWeight="700" color="$color">
-                      Personal Information
-                    </Text>
-                    <YStack gap="$1">
-                      <XStack alignItems="center" gap="$2">
-                        <Ionicons name="calendar" size={16} color="#64748B" />
-                        <Text fontSize="$3" color="$color10">
-                          Age: {profile?.age || 'Not set'}
-                        </Text>
-                      </XStack>
-                      {profile?.blood_group && (
-                        <XStack alignItems="center" gap="$2">
-                          <Ionicons name="water" size={16} color="#64748B" />
-                          <Text fontSize="$3" color="$color10">
-                            Blood Group: {profile.blood_group}
-                          </Text>
-                        </XStack>
-                      )}
-                      {profile?.emergency_contact && (
-                        <XStack alignItems="center" gap="$2">
-                          <Ionicons name="call" size={16} color="#64748B" />
-                          <Text fontSize="$3" color="$color10">
-                            Emergency: {profile.emergency_contact}
-                          </Text>
-                        </XStack>
-                      )}
-                    </YStack>
-                  </YStack>
-                  <Ionicons name="chevron-forward" size={20} color="#94A3B8" />
-                </XStack>
-              </Card>
-            </Animated.View>
+        {/* Stats Row */}
+        <XStack gap="$3" paddingHorizontal="$4" marginBottom="$6">
+          <Card style={styles.statCard}>
+            <Text style={styles.statLabel}>AGE</Text>
+            <Text style={styles.statValue}>{profile?.age || '--'} Yrs</Text>
+          </Card>
+          <Card style={styles.statCard}>
+            <Text style={styles.statLabel}>HEIGHT</Text>
+            <Text style={styles.statValue}>{profile?.height || '--'} cm</Text>
+          </Card>
+          <Card style={styles.statCard}>
+            <Text style={styles.statLabel}>WEIGHT</Text>
+            <Text style={styles.statValue}>{profile?.weight || '--'} kg</Text>
+          </Card>
+        </XStack>
 
-            {/* QR Health Card Section */}
-            <Animated.View style={useEntranceAnimation(2, 100)}>
-              <Card
-                padding="$4"
-                borderRadius="$8"
-                backgroundColor="$background"
-              >
-                <Text fontSize="$6" fontWeight="700" color="$color" marginBottom="$4">
-                  My QR Health Card
-                </Text>
-
-                <YStack gap="$4">
-                  {/* Emergency QR */}
-                  <YStack alignItems="center" gap="$3">
-                    <Text fontSize="$4" fontWeight="600" color="$color">
-                      Emergency QR
-                    </Text>
-                    <Card
-                      padding="$4"
-                      borderRadius="$8"
-                      backgroundColor="white"
-                      borderWidth={2}
-                      borderColor="$red9"
-                      alignItems="center"
-                    >
-                      <QRDisplay value={emergencyQR} size={160} />
-                      <Text fontSize="$2" color="$color10" marginTop="$2" textAlign="center">
-                        Show to first responders
-                      </Text>
-                    </Card>
-                  </YStack>
-
-                  {/* Full Records QR */}
-                  <YStack alignItems="center" gap="$3">
-                    <Text fontSize="$4" fontWeight="600" color="$color">
-                      Full Records QR
-                    </Text>
-                    <Card
-                      padding="$4"
-                      borderRadius="$8"
-                      backgroundColor="white"
-                      alignItems="center"
-                    >
-                      <QRDisplay value={fullRecordsQR} size={160} />
-                      <Text fontSize="$2" color="$color10" marginTop="$2" textAlign="center">
-                        Complete medical history
-                      </Text>
-                    </Card>
-                  </YStack>
-
-                  {/* QR Actions */}
-                  <XStack gap="$2" flexWrap="wrap">
-                    <Button
-                      flex={1}
-                      size="$4"
-                      borderRadius="$8"
-                      backgroundColor="$blue10"
-                      minWidth={120}
-                    >
-                      <Text fontSize="$3" fontWeight="600" color="white">
-                        View Full Size
-                      </Text>
-                    </Button>
-                    <Button
-                      flex={1}
-                      size="$4"
-                      borderRadius="$8"
-                      backgroundColor="transparent"
-                      borderWidth={1}
-                      borderColor="$borderColor"
-                      minWidth={120}
-                    >
-                      <Text fontSize="$3" fontWeight="600" color="$color">
-                        Download
-                      </Text>
-                    </Button>
-                    <Button
-                      flex={1}
-                      size="$4"
-                      borderRadius="$8"
-                      backgroundColor="transparent"
-                      minWidth={120}
-                      onPress={() => setShowRegenerateDialog(true)}
-                    >
-                      <Text fontSize="$3" fontWeight="600" color="$red9">
-                        Regenerate
-                      </Text>
-                    </Button>
-                  </XStack>
-                </YStack>
-              </Card>
-            </Animated.View>
-
-            {/* Accordion Sections */}
-            <Animated.View style={useEntranceAnimation(3, 100)}>
-              <Accordion type="multiple" width="100%">
-                {/* Active Medications */}
-                <Accordion.Item value="medications">
-                  <Accordion.Trigger
-                    flexDirection="row"
-                    justifyContent="space-between"
-                    padding="$4"
-                    borderRadius="$8"
-                    backgroundColor="$background"
-                    borderWidth={1}
-                    borderColor="$borderColor"
-                  >
-                    <XStack alignItems="center" gap="$3">
-                      <Ionicons name="medical" size={20} color="#007AFF" />
-                      <Text fontSize="$5" fontWeight="600" color="$color">
-                        Active Medications
-                      </Text>
-                    </XStack>
-                    <Accordion.Content>
-                      <Ionicons name="chevron-down" size={20} color="#64748B" />
-                    </Accordion.Content>
-                  </Accordion.Trigger>
-                  <Accordion.Content padding="$4" backgroundColor="$gray1">
-                    <YStack gap="$3">
-                      {activeMeds.length > 0 ? (
-                        activeMeds.map((med) => (
-                          <XStack
-                            key={med.id}
-                            alignItems="center"
-                            justifyContent="space-between"
-                            padding="$3"
-                            borderRadius="$6"
-                            backgroundColor="$background"
-                          >
-                            <YStack>
-                              <Text fontSize="$4" fontWeight="600" color="$color">
-                                {med.name}
-                              </Text>
-                              <Text fontSize="$3" color="$color10">
-                                {med.dosage} • {med.frequency}
-                              </Text>
-                            </YStack>
-                            <Text fontSize="$3" color="$blue10" fontWeight="600">
-                              {med.time_of_day || 'Scheduled'}
-                            </Text>
-                          </XStack>
-                        ))
-                      ) : (
-                        <Text fontSize="$4" color="$color10" textAlign="center" padding="$4">
-                          No active medications
-                        </Text>
-                      )}
-                    </YStack>
-                  </Accordion.Content>
-                </Accordion.Item>
-
-                {/* Data & Privacy */}
-                <Accordion.Item value="privacy" marginTop="$3">
-                  <Accordion.Trigger
-                    flexDirection="row"
-                    justifyContent="space-between"
-                    padding="$4"
-                    borderRadius="$8"
-                    backgroundColor="$background"
-                    borderWidth={1}
-                    borderColor="$borderColor"
-                  >
-                    <XStack alignItems="center" gap="$3">
-                      <Ionicons name="lock-closed" size={20} color="#007AFF" />
-                      <Text fontSize="$5" fontWeight="600" color="$color">
-                        Data & Privacy
-                      </Text>
-                    </XStack>
-                    <Accordion.Content>
-                      <Ionicons name="chevron-down" size={20} color="#64748B" />
-                    </Accordion.Content>
-                  </Accordion.Trigger>
-                  <Accordion.Content padding="$4" backgroundColor="$gray1">
-                    <YStack gap="$4">
-                      <XStack alignItems="center" justifyContent="space-between">
-                        <YStack flex={1}>
-                          <Text fontSize="$4" fontWeight="600" color="$color">
-                            Cloud Sync
-                          </Text>
-                          <Text fontSize="$3" color="$color10">
-                            Sync data across devices
-                          </Text>
-                        </YStack>
-                        <Switch
-                          checked={dataSyncEnabled}
-                          onCheckedChange={setDataSyncEnabled}
-                          size="$4"
-                        />
-                      </XStack>
-                      <Button
-                        size="$4"
-                        borderRadius="$8"
-                        backgroundColor="transparent"
-                        borderWidth={1}
-                        borderColor="$borderColor"
-                      >
-                        <Text fontSize="$4" fontWeight="600" color="$color">
-                          Export All Data
-                        </Text>
-                      </Button>
-                      <Button
-                        size="$4"
-                        borderRadius="$8"
-                        backgroundColor="transparent"
-                        borderWidth={1}
-                        borderColor="$red9"
-                      >
-                        <Text fontSize="$4" fontWeight="600" color="$red9">
-                          Delete Account
-                        </Text>
-                      </Button>
-                    </YStack>
-                  </Accordion.Content>
-                </Accordion.Item>
-
-                {/* App Settings */}
-                <Accordion.Item value="settings" marginTop="$3">
-                  <Accordion.Trigger
-                    flexDirection="row"
-                    justifyContent="space-between"
-                    padding="$4"
-                    borderRadius="$8"
-                    backgroundColor="$background"
-                    borderWidth={1}
-                    borderColor="$borderColor"
-                  >
-                    <XStack alignItems="center" gap="$3">
-                      <Ionicons name="settings" size={20} color="#007AFF" />
-                      <Text fontSize="$5" fontWeight="600" color="$color">
-                        App Settings
-                      </Text>
-                    </XStack>
-                    <Accordion.Content>
-                      <Ionicons name="chevron-down" size={20} color="#64748B" />
-                    </Accordion.Content>
-                  </Accordion.Trigger>
-                  <Accordion.Content padding="$4" backgroundColor="$gray1">
-                    <YStack gap="$4">
-                      <XStack alignItems="center" justifyContent="space-between">
-                        <YStack flex={1}>
-                          <Text fontSize="$4" fontWeight="600" color="$color">
-                            Notifications
-                          </Text>
-                          <Text fontSize="$3" color="$color10">
-                            Medication reminders and alerts
-                          </Text>
-                        </YStack>
-                        <Switch
-                          checked={notificationsEnabled}
-                          onCheckedChange={setNotificationsEnabled}
-                          size="$4"
-                        />
-                      </XStack>
-                      <Button
-                        size="$4"
-                        borderRadius="$8"
-                        backgroundColor="transparent"
-                        borderWidth={1}
-                        borderColor="$borderColor"
-                      >
-                        <Text fontSize="$4" fontWeight="600" color="$color">
-                          Language: English
-                        </Text>
-                      </Button>
-                    </YStack>
-                  </Accordion.Content>
-                </Accordion.Item>
-              </Accordion>
-            </Animated.View>
-
-            {/* Logout Button */}
-            <Animated.View style={useEntranceAnimation(4, 100)}>
-              <Button
-                size="$5"
-                borderRadius="$9"
-                backgroundColor="transparent"
-                borderWidth={1.5}
-                borderColor="$red9"
-                onPress={() => {
-                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                  handleLogout();
-                }}
-                marginTop="$4"
-              >
-                <Text fontSize="$5" fontWeight="600" color="$red9">
-                  Logout
-                </Text>
-              </Button>
-            </Animated.View>
+        {/* Medical ID Card */}
+        <TouchableOpacity 
+          style={styles.medicalIdCard}
+          onPress={handleNavigateToQR}
+          activeOpacity={0.8}
+        >
+          <YStack>
+            <Text style={styles.medicalIdTitle}>Medical ID</Text>
+            <Text style={styles.medicalIdSubtitle}>Scan to share your{'\n'}emergency medical record</Text>
           </YStack>
-        </ResponsiveContainer>
-      </ScrollView>
+          <View style={styles.qrIconContainer}>
+            <Ionicons name="qr-code" size={32} color="#1A1A1A" />
+          </View>
+        </TouchableOpacity>
 
-      {/* Regenerate QR Dialog */}
-      <Dialog modal open={showRegenerateDialog} onOpenChange={setShowRegenerateDialog}>
-        <Dialog.Portal>
-          <Dialog.Overlay />
-          <Dialog.Content
-            padding="$5"
-            borderRadius="$6"
-            backgroundColor="$background"
-            borderWidth={1}
-            borderColor="$borderColor"
-            maxWidth={400}
+        {/* Health Management Section */}
+        <YStack paddingHorizontal="$4" marginTop="$6">
+          <Text style={styles.sectionTitle}>HEALTH MANAGEMENT</Text>
+          <Card style={styles.menuCard}>
+            <MenuItem
+              icon="bandage-outline"
+              iconBgColor="#EBF4FF"
+              iconColor="#3B82F6"
+              title="Active Medications"
+              subtitle={`${prescriptionCount} Ongoing Prescriptions`}
+              onPress={handleNavigateToMedications}
+            />
+            <MenuItem
+              icon="notifications-outline"
+              iconBgColor="#FEF3C7"
+              iconColor="#F59E0B"
+              title="Reminders"
+              subtitle="Daily 8:00 AM, 9:00 PM"
+              showBorder={false}
+            />
+          </Card>
+        </YStack>
+
+        {/* Settings & Privacy Section */}
+        <YStack paddingHorizontal="$4" marginTop="$6">
+          <Text style={styles.sectionTitle}>SETTINGS & PRIVACY</Text>
+          <Card style={styles.menuCard}>
+            <MenuItem
+              icon="shield-outline"
+              iconBgColor="#F3F4F6"
+              iconColor="#374151"
+              title="Data & Privacy"
+              subtitle="Manage shared permissions"
+            />
+            <MenuItem
+              icon="globe-outline"
+              iconBgColor="#F3F4F6"
+              iconColor="#374151"
+              title="Language"
+              subtitle="English (US)"
+            />
+            <MenuItem
+              icon="phone-portrait-outline"
+              iconBgColor="#F3F4F6"
+              iconColor="#374151"
+              title="App Settings"
+              subtitle="Notifications, Appearance"
+              showBorder={false}
+            />
+          </Card>
+        </YStack>
+
+        {/* Logout Button */}
+        <YStack paddingHorizontal="$4" marginTop="$8" marginBottom="$6">
+          <TouchableOpacity 
+            style={styles.logoutButton}
+            onPress={handleLogout}
+            activeOpacity={0.8}
           >
-            <Dialog.Title fontSize="$6" fontWeight="700" color="$color" marginBottom="$3">
-              Regenerate QR Codes?
-            </Dialog.Title>
-            <Dialog.Description fontSize="$4" color="$color10" marginBottom="$4">
-              This will invalidate your current QR codes. You'll need to download and print new ones. This action cannot be undone.
-            </Dialog.Description>
-            <XStack gap="$3" justifyContent="flex-end">
-              <Button
-                size="$4"
-                borderRadius="$5"
-                backgroundColor="transparent"
-                borderWidth={1}
-                borderColor="$borderColor"
-                onPress={() => setShowRegenerateDialog(false)}
-              >
-                <Text fontSize="$4" fontWeight="600" color="$color">
-                  Cancel
-                </Text>
-              </Button>
-              <Button
-                size="$4"
-                borderRadius="$5"
-                backgroundColor="$red9"
-                onPress={handleRegenerateQR}
-              >
-                <Text fontSize="$4" fontWeight="600" color="white">
-                  Regenerate
-                </Text>
-              </Button>
-            </XStack>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog>
+            <Ionicons name="log-out-outline" size={20} color="#EF4444" />
+            <Text style={styles.logoutText}>Log Out</Text>
+          </TouchableOpacity>
+        </YStack>
+      </ScrollView>
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#FAFBFC',
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#1A1A1A',
+  },
+  scrollContent: {
+    paddingBottom: 32,
+  },
+  avatar: {
+    marginBottom: 16,
+    borderWidth: 3,
+    borderColor: '#E5E7EB',
+  },
+  avatarFallback: {
+    backgroundColor: '#E5E7EB',
+  },
+  avatarText: {
+    fontSize: 36,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  userName: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#1A1A1A',
+  },
+  bloodTypeBadge: {
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  bloodTypeText: {
+    color: '#DC2626',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  emailText: {
+    color: '#6B7280',
+    fontSize: 14,
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: 'white',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  statLabel: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#9CA3AF',
+    marginBottom: 4,
+    letterSpacing: 0.5,
+  },
+  statValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1A1A1A',
+  },
+  medicalIdCard: {
+    marginHorizontal: 16,
+    backgroundColor: 'white',
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  medicalIdTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    marginBottom: 4,
+  },
+  medicalIdSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    lineHeight: 18,
+  },
+  qrIconContainer: {
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6B7280',
+    letterSpacing: 0.5,
+    marginBottom: 12,
+    marginLeft: 4,
+  },
+  menuCard: {
+    backgroundColor: 'white',
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  menuItemBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  iconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  menuTextContainer: {
+    flex: 1,
+  },
+  menuTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    marginBottom: 2,
+  },
+  menuSubtitle: {
+    fontSize: 13,
+    color: '#9CA3AF',
+  },
+  logoutButton: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: 16,
+    paddingVertical: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  logoutText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#EF4444',
+  },
+});
