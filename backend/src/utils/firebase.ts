@@ -46,5 +46,17 @@ if (!admin.apps.length) {
     }
 }
 
-export const auth: Auth = admin.auth();
+/** Lazy: do not call admin.auth() at load—crashes on Vercel when no app is initialized. */
+function getAuth(): Auth {
+    if (!admin.apps.length) {
+        throw new Error('Firebase not initialized. Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY in Vercel.');
+    }
+    return admin.auth();
+}
+
+export const auth = new Proxy({} as Auth, {
+    get(_, prop) {
+        return (getAuth() as unknown as Record<string, unknown>)[prop as string];
+    },
+});
 export default admin;
