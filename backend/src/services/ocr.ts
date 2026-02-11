@@ -1,16 +1,19 @@
 /**
  * OCR Service using Tesseract.js
  * Extracts text from images and PDFs
+ * Tesseract and pdf-parse are lazy-loaded so serverless (e.g. Vercel) can cold start without loading them.
  */
 
-import Tesseract from 'tesseract.js';
-const { PDFParse } = require('pdf-parse');
-
-/**
- * Extract text from a dictionary-based PDF buffer
- */
-// Import Gemini OCR helper
 import { extractTextFromPdfWithGemini, extractTextFromImageWithGemini } from './gemini.js';
+
+async function getPDFParse(): Promise<any> {
+    const m = await import('pdf-parse');
+    return (m as any).PDFParse ?? (m as any).default?.PDFParse;
+}
+
+async function getTesseract(): Promise<typeof import('tesseract.js')> {
+    return (await import('tesseract.js')).default;
+}
 
 /**
  * Extract text from a dictionary-based PDF buffer
@@ -22,6 +25,7 @@ export async function extractTextFromPdf(pdfBuffer: Buffer): Promise<string> {
 
     // 1. Try standard extraction first (fast)
     try {
+        const PDFParse = await getPDFParse();
         const parser = new PDFParse({ data: pdfBuffer });
         const data = await parser.getText();
         text = normalizeText(data.text);
@@ -62,6 +66,7 @@ export async function extractTextFromImage(
     mimeType: string = 'image/png'
 ): Promise<string> {
     console.log('Starting OCR extraction (Tesseract)...');
+    const Tesseract = await getTesseract();
 
     try {
         const result = await Tesseract.recognize(

@@ -1,12 +1,20 @@
 /**
  * Embeddings Service using Transformer.js
  * Uses all-MiniLM-L6-v2 model (384 dimensions)
+ * Lazy-loads @xenova/transformers so serverless (e.g. Vercel) can start without loading the model at cold start.
  */
-
-import { pipeline } from '@xenova/transformers';
 
 let embeddingPipeline: any = null;
 let isLoading = false;
+
+async function loadPipeline(): Promise<any> {
+    const { pipeline } = await import('@xenova/transformers');
+    return await pipeline(
+        'feature-extraction',
+        'Xenova/all-MiniLM-L6-v2',
+        { quantized: true }
+    );
+}
 
 /**
  * Initialize the embedding model (call once at startup)
@@ -18,13 +26,7 @@ export async function initEmbeddings(): Promise<void> {
     console.log('Loading embedding model...');
 
     try {
-        embeddingPipeline = await pipeline(
-            'feature-extraction',
-            'Xenova/all-MiniLM-L6-v2',
-            {
-                quantized: true // Use quantized model for faster inference
-            }
-        );
+        embeddingPipeline = await loadPipeline();
         console.log('Embedding model loaded successfully');
     } catch (error) {
         console.error('Failed to load embedding model:', error);
