@@ -380,3 +380,196 @@ INVALID TYPES (REJECT THESE):
         }
     });
 }
+
+/**
+ * Generate Health Predictions using Gemini (Fallback)
+ */
+export async function generateGeminiHealthPredictions(
+    intakes: any[],
+    medications: any[]
+): Promise<any> {
+    const PREDICTION_SYSTEM_PROMPT = `You are an advanced Medical Prediction AI (BioGPT-based logic).
+Analyze the patient's medication intake history and generate actionable health insights and predictions.
+
+INPUT DATA:
+- Medication List
+- Intake History
+- Calculated Adherence Metrics
+
+OUTPUT FORMAT (JSON):
+{
+  "insights": [
+    {
+      "type": "prediction" | "warning" | "success" | "info",
+      "message": "Insight text...",
+      "icon": "TrendingUp" | "AlertTriangle" | "CheckCircle" | "Info",
+      "color": "green" | "red" | "blue" | "orange"
+    }
+  ]
+}
+
+RULES:
+1. Focus purely on medical/behavioral insights.
+2. If adherence is high, predict positive outcomes.
+3. Identify patterns (e.g., "Missed doses on weekends").
+4. Keep messages concise and actionable.`;
+
+    // --- Deterministic Metric Calculation (Mirrors OpenAI implementation) ---
+
+    // 1. Calculate Graph Data (Last 7 Days Intakes)
+    const graphData: { label: string; value: number }[] = [];
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const today = new Date();
+
+    for (let i = 6; i >= 0; i--) {
+        const d = new Date(today);
+        d.setDate(today.getDate() - i);
+        const dayLabel = days[d.getDay()];
+
+        const count = intakes.filter(intake => {
+            const intakeDate = new Date(intake.taken_time);
+            return intakeDate.toDateString() === d.toDateString() && intake.status === 'taken';
+        }).length;
+
+        // Scale to 100 for visualization (assuming 5 doses = 100% activity)
+        const value = Math.min(count * 20, 100);
+        graphData.push({ label: dayLabel, value: value });
+    }
+
+    // 2. Calculate Duration/Progress Data
+    const totalActiveMeds = medications.length || 1;
+    const intakesToday = intakes.filter(intake => {
+        const intakeDate = new Date(intake.taken_time);
+        return intakeDate.toDateString() === today.toDateString() && intake.status === 'taken';
+    }).length;
+
+    const percentage = Math.min(Math.round((intakesToday / totalActiveMeds) * 100), 100);
+
+    const durationData = {
+        medicationName: "Daily Adherence",
+        completedDays: intakesToday,
+        totalDays: totalActiveMeds,
+        percentage: percentage
+    };
+
+    return executeWithFallback(async (modelName) => {
+        console.log(`[Gemini Predictions] Generating with ${modelName}...`);
+
+        const context = {
+            calculated_metrics: {
+                last_7_days_adherence: graphData,
+                today_progress: `${intakesToday} / ${totalActiveMeds} doses taken`
+            },
+            medication_list: medications.map(m => m.drug_name || m.name),
+            recent_history: intakes.slice(0, 10).map(i => `${i.drug_name} taken at ${i.taken_time}`)
+        };
+
+        const response = await ai.models.generateContent({
+            model: modelName,
+            contents: [
+                {
+                    role: 'user',
+                    parts: [{ text: `${PREDICTION_SYSTEM_PROMPT}\n\nPATIENT DATA:\n${JSON.stringify(context, null, 2)}` }]
+                }
+            ],
+            config: {
+                responseMimeType: "application/json",
+                temperature: 0.4
+            }
+        });
+
+        const rawText = response.text || '{}';
+
+        try {
+            const aiResponse = JSON.parse(rawText);
+            return {
+                graphData,
+                durationData,
+                insights: aiResponse.insights || []
+            };
+        } catch (e) {
+            console.error('[Gemini Predictions] JSON Parse Failed:', rawText);
+            // Return deterministic data with error insight
+            return {
+                graphData,
+                durationData,
+                insights: [{ type: "info", message: "AI generation failed, showing raw data.", icon: "Info", color: "blue" }]
+            };
+        }
+    });
+}
+
+/**
+ * Generate Structured Insights using Gemini (Fallback)
+ */
+export async function generateGeminiStructuredInsights(
+    documentText: string
+): Promise<any> {
+    const INSIGHT_SYSTEM_PROMPT = `You are an expert Medical AI Analyst.
+Analyze the provided medical document text and generate structured insights.
+
+OUTPUT FORMAT (JSON):
+{
+  "title": "Short title",
+  "documentType": "lab_report" | "prescription" | "imaging" | "discharge_summary" | "other",
+  "overview": "2-3 sentence summary",
+  "keyFindings": [
+    {
+      "category": "Category",
+      "finding": "Finding description",
+      "status": "normal" | "abnormal" | "critical" | "info",
+      "value": "Value",
+      "reference": "Range"
+    }
+  ],
+  "sections": [
+    { "title": "Section Title", "content": "Content..." }
+  ],
+  "recommendations": ["Recommendation 1"],
+  "followUpActions": [
+    { "action": "Action", "priority": "high", "timeframe": "Time" }
+  ],
+  "conditions": [
+    { "name": "Condition", "severity": "medium", "notes": "Explanation" }
+  ],
+  "charts": {
+    "vitals": [
+      { "label": "Vital", "value": 100, "min": 0, "max": 200, "unit": "unit" }
+    ],
+    "progressBars": [],
+    "trends": []
+  }
+}
+
+IMPORTANT RULES:
+1. Always include at least 3 keyFindings with specific values when available
+2. Extract ALL measurable values from the document into the vitals array
+3. Provide at least 3 specific, actionable recommendations`;
+
+    return executeWithFallback(async (modelName) => {
+        console.log(`[Gemini Insights] Generating with ${modelName}...`);
+
+        const response = await ai.models.generateContent({
+            model: modelName,
+            contents: [
+                {
+                    role: 'user',
+                    parts: [{ text: `${INSIGHT_SYSTEM_PROMPT}\n\nMEDICAL DOCUMENT:\n${documentText}` }]
+                }
+            ],
+            config: {
+                responseMimeType: "application/json",
+                temperature: 0.3
+            }
+        });
+
+        const rawText = response.text || '{}';
+
+        try {
+            return JSON.parse(rawText);
+        } catch (e) {
+            console.error('[Gemini Insights] JSON Parse Failed:', rawText);
+            throw new Error('Invalid JSON from Gemini');
+        }
+    });
+}

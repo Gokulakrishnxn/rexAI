@@ -8,6 +8,8 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
+  Platform,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -25,9 +27,11 @@ import {
   Info,
   Trash2,
   PlusCircle,
+  Clock, // [NEW] - Imported Clock
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { confirmMedicationPlan } from '../../services/api/backendApi';
+// import DatePicker from 'react-native-date-picker'; // Removed due to native module crash
 
 type NavigationProp = NativeStackNavigationProp<any>;
 
@@ -35,6 +39,7 @@ interface MedicationDraft {
   drug_name: string;
   dosage: string;
   frequency_text: string;
+  recommended_times: string[]; // [NEW]
   duration_days: number;
   instructions?: string;
   confidence?: number;
@@ -55,13 +60,79 @@ export function MedicationReviewScreen() {
   const [editingField, setEditingField] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // Time Picker State
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [activeTimePicker, setActiveTimePicker] = useState<{
+    medIndex: number;
+    timeIndex: number | null; // null means adding a new time
+    currentValue: Date;
+  } | null>(null);
+
+  const onConfirmTime = (selectedDate: Date) => {
+    setShowTimePicker(false);
+
+    if (!activeTimePicker) return;
+
+    const { medIndex, timeIndex } = activeTimePicker;
+
+    // Format to HH:mm
+    const hours = selectedDate.getHours().toString().padStart(2, '0');
+    const minutes = selectedDate.getMinutes().toString().padStart(2, '0');
+    const timeString = `${hours}:${minutes}`;
+
+    const currentMed = medications[medIndex];
+    const currentTimes = currentMed.recommended_times || [];
+    let newTimes = [...currentTimes];
+
+    if (timeIndex !== null) {
+      // Editing existing time
+      newTimes[timeIndex] = timeString;
+    } else {
+      // Adding new time
+      newTimes.push(timeString);
+    }
+
+    // Sort times
+    newTimes.sort();
+
+    handleUpdateMedication(medIndex, 'recommended_times', newTimes);
+
+    // Reset picker state
+    setActiveTimePicker(null);
+  };
+
+  const onCancelTime = () => {
+    setShowTimePicker(false);
+    setActiveTimePicker(null);
+  };
+
+  const openTimePicker = (medIndex: number, timeIndex: number | null, timeValue?: string) => {
+    const now = new Date();
+    if (timeValue) {
+      const [hours, minutes] = timeValue.split(':').map(Number);
+      now.setHours(hours);
+      now.setMinutes(minutes);
+    } else {
+      // Default to next hour if adding
+      now.setMinutes(0);
+      now.setHours(now.getHours() + 1);
+    }
+
+    setActiveTimePicker({
+      medIndex,
+      timeIndex,
+      currentValue: now
+    });
+    setShowTimePicker(true);
+  };
+
   // Get accuracy based on confidence
   const getAccuracy = (confidence?: number) => {
     if (!confidence) return Math.floor(Math.random() * 10 + 90); // 90-99%
     return Math.round(confidence * 100);
   };
 
-  const handleUpdateMedication = (index: number, field: string, value: string | number) => {
+  const handleUpdateMedication = (index: number, field: string, value: string | number | string[]) => {
     setMedications((prev) => {
       const updated = [...prev];
       updated[index] = { ...updated[index], [field]: value };
@@ -99,6 +170,7 @@ export function MedicationReviewScreen() {
       drug_name: '',
       dosage: '',
       frequency_text: '',
+      recommended_times: ['09:00'], // Default
       duration_days: 7,
       instructions: '',
       confidence: 1,
@@ -132,11 +204,32 @@ export function MedicationReviewScreen() {
       return;
     }
 
-    // Validate medication names
-    const emptyMeds = medications.filter((med) => !med.drug_name.trim());
-    if (emptyMeds.length > 0) {
-      Alert.alert('Missing Information', 'Please enter a name for all medications.');
-      return;
+    // Validate medication names and frequency match
+    for (let i = 0; i < medications.length; i++) {
+      const med = medications[i];
+      if (!med.drug_name.trim()) {
+        Alert.alert('Missing Information', `Please enter a name for medication #${i + 1}.`);
+        return;
+      }
+
+      // Parse frequency to number (naive parsing for now, user should verify)
+      // Defaults to 1 if not found
+      let freqNum = 1;
+      const lowerFreq = med.frequency_text.toLowerCase();
+      if (lowerFreq.includes('twice') || lowerFreq.includes('2x') || lowerFreq.includes('bid')) freqNum = 2;
+      else if (lowerFreq.includes('three') || lowerFreq.includes('3x') || lowerFreq.includes('tid')) freqNum = 3;
+      else if (lowerFreq.includes('four') || lowerFreq.includes('4x') || lowerFreq.includes('qid')) freqNum = 4;
+
+      // Check if times match frequency
+      const currentTimes = med.recommended_times || getRecommendedTimes(med.frequency_text);
+
+      if (currentTimes.length !== freqNum) {
+        Alert.alert(
+          'Schedule Mismatch',
+          `Medication "${med.drug_name || 'Item ' + (i + 1)}" has frequency "${med.frequency_text}" (${freqNum}x) but ${currentTimes.length} time(s) scheduled. Please add or remove times to match.`
+        );
+        return;
+      }
     }
 
     setSaving(true);
@@ -147,7 +240,9 @@ export function MedicationReviewScreen() {
       const medicationsWithImage = medications.map((med) => ({
         ...med,
         prescription_image: imageBase64,
-        recommended_times: getRecommendedTimes(med.frequency_text),
+        recommended_times: med.recommended_times && med.recommended_times.length > 0
+          ? med.recommended_times
+          : getRecommendedTimes(med.frequency_text), // Fallback if empty
         normalized_name: med.drug_name.toLowerCase().trim(),
         form: 'tablet', // Default form
       }));
@@ -268,6 +363,74 @@ export function MedicationReviewScreen() {
             </View>
           </YStack>
         </XStack>
+
+        {/* Time Selection [NEW] */}
+        <YStack marginTop={16}>
+          <Text fontSize={13} color="#666" fontWeight="500" marginBottom={8}>
+            Scheduled Times <Text color="red">*</Text>
+          </Text>
+          <XStack flexWrap="wrap" gap="$2">
+            {(med.recommended_times || getRecommendedTimes(med.frequency_text)).map((time, tIndex) => (
+              <TouchableOpacity
+                key={tIndex}
+                onPress={() => {
+                  openTimePicker(index, tIndex, time);
+                }}
+                style={{
+                  backgroundColor: '#F2F7FF',
+                  paddingHorizontal: 16,
+                  paddingVertical: 8,
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderColor: '#007AFF', // Highlight it
+                }}
+              >
+                <XStack alignItems="center" gap="$2">
+                  <Clock size={14} color="#007AFF" />
+                  <Text fontSize={14} fontWeight="600" color="#007AFF">{time}</Text>
+                </XStack>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={{
+                paddingHorizontal: 12,
+                paddingVertical: 8,
+                borderRadius: 8,
+                borderWidth: 1,
+                borderColor: '#E5E5EA',
+                backgroundColor: 'white',
+                borderStyle: 'dashed'
+              }}
+              onPress={() => {
+                openTimePicker(index, null);
+              }}
+            >
+              <Plus size={16} color="#8E8E93" />
+            </TouchableOpacity>
+            {/* Delete time button (only if > 0) */}
+            {(med.recommended_times?.length > 0) && (
+              <TouchableOpacity
+                style={{
+                  paddingHorizontal: 12,
+                  paddingVertical: 8,
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderColor: '#FF3B30',
+                  backgroundColor: 'white',
+                  borderStyle: 'dashed',
+                  marginLeft: 4
+                }}
+                onPress={() => {
+                  const currentTimes = med.recommended_times || [];
+                  const newTimes = currentTimes.slice(0, -1);
+                  handleUpdateMedication(index, 'recommended_times', newTimes);
+                }}
+              >
+                <Minus size={16} color="#FF3B30" />
+              </TouchableOpacity>
+            )}
+          </XStack>
+        </YStack>
 
         {/* Duration */}
         <YStack marginTop={16}>
@@ -416,6 +579,81 @@ export function MedicationReviewScreen() {
           </TouchableOpacity>
         </View>
       </SafeAreaView>
+
+      {/* Date Time Picker Modal */}
+      {/* Custom Time Picker Modal (Safe for Expo Go / Dev Client) */}
+      <Modal
+        visible={showTimePicker}
+        transparent
+        animationType="fade"
+        onRequestClose={onCancelTime}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
+          <View style={{ backgroundColor: 'white', borderRadius: 20, padding: 24, width: '85%', alignItems: 'center' }}>
+            <Text fontSize={18} fontWeight="700" marginBottom={20}>Select Time</Text>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 24 }}>
+              {/* Hour Input (Simple approach: TextInput with validation or up/down)
+                   For this fix, we'll use a simple approach: Two inputs for HH : MM 
+               */}
+              <View style={{ alignItems: 'center' }}>
+                <TextInput
+                  style={{ fontSize: 32, fontWeight: 'bold', color: '#007AFF', textAlign: 'center', width: 60, borderBottomWidth: 1, borderColor: '#E5E5EA' }}
+                  keyboardType="number-pad"
+                  maxLength={2}
+                  placeholder="00"
+                  value={activeTimePicker?.currentValue ? activeTimePicker.currentValue.getHours().toString().padStart(2, '0') : '09'}
+                  onChangeText={(text) => {
+                    const val = parseInt(text);
+                    if (!isNaN(val) && val >= 0 && val <= 23) {
+                      const newDate = new Date(activeTimePicker?.currentValue || new Date());
+                      newDate.setHours(val);
+                      setActiveTimePicker(prev => prev ? ({ ...prev, currentValue: newDate }) : null);
+                    }
+                  }}
+                />
+                <Text fontSize={12} color="#8E8E93">Hour</Text>
+              </View>
+
+              <Text fontSize={32} fontWeight="bold" color="#1C1C1E">:</Text>
+
+              <View style={{ alignItems: 'center' }}>
+                <TextInput
+                  style={{ fontSize: 32, fontWeight: 'bold', color: '#007AFF', textAlign: 'center', width: 60, borderBottomWidth: 1, borderColor: '#E5E5EA' }}
+                  keyboardType="number-pad"
+                  maxLength={2}
+                  placeholder="00"
+                  value={activeTimePicker?.currentValue ? activeTimePicker.currentValue.getMinutes().toString().padStart(2, '0') : '00'}
+                  onChangeText={(text) => {
+                    const val = parseInt(text);
+                    if (!isNaN(val) && val >= 0 && val <= 59) {
+                      const newDate = new Date(activeTimePicker?.currentValue || new Date());
+                      newDate.setMinutes(val);
+                      setActiveTimePicker(prev => prev ? ({ ...prev, currentValue: newDate }) : null);
+                    }
+                  }}
+                />
+                <Text fontSize={12} color="#8E8E93">Minute</Text>
+              </View>
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+              <TouchableOpacity
+                style={{ flex: 1, padding: 14, borderRadius: 12, backgroundColor: '#F2F2F7', alignItems: 'center' }}
+                onPress={onCancelTime}
+              >
+                <Text fontSize={16} fontWeight="600" color="#8E8E93">Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ flex: 1, padding: 14, borderRadius: 12, backgroundColor: '#007AFF', alignItems: 'center' }}
+                onPress={() => onConfirmTime(activeTimePicker?.currentValue || new Date())}
+              >
+                <Text fontSize={16} fontWeight="600" color="white">Confirm</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }

@@ -18,4 +18,21 @@ export interface Medication {
   duration_days?: number;
   created_at?: string;
   prescription_image?: string;
+  medication_schedules?: {
+    id: string;
+    medication_id: string;
+    user_id: string;
+    start_date: string;
+    end_date?: string;
+    times_per_day: number;
+    exact_times: string[];
+  }[];
+  today_intakes?: {
+    id: string;
+    medication_id?: string;
+    schedule_id: string;
+    taken_time: string;
+    scheduled_time: string;
+    status: string;
+  }[];
 }

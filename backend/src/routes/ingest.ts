@@ -47,6 +47,13 @@ router.post('/', verifyFirebaseToken as any, async (req: FirebaseRequest, res: R
 
         if (!text || text.trim().length === 0) text = "[EMPTY DOCUMENT]";
 
+        // Store extracted text for AI analysis
+        const { supabase } = await import('../utils/supabase.js');
+        await supabase
+            .from('documents')
+            .update({ extracted_text: text })
+            .eq('id', document.id);
+
         // Chunk, Embed, Store
         const chunks = chunkText(text, { maxTokens: 256, overlapTokens: 50 });
         const embeddings = await embedBatch(chunks.map(c => c.content));

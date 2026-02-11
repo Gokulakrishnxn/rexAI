@@ -104,4 +104,48 @@ router.delete('/:sessionId', verifyFirebaseToken as any, async (req: FirebaseReq
     }
 });
 
+/**
+ * PATCH /api/sessions/:sessionId
+ * Rename a chat session
+ */
+router.patch('/:sessionId', verifyFirebaseToken as any, async (req: FirebaseRequest, res: Response) => {
+    try {
+        const { sessionId } = req.params;
+        const { title } = req.body;
+
+        if (!title || typeof title !== 'string') {
+            return res.status(400).json({ success: false, error: 'Title is required' });
+        }
+
+        // Verify ownership
+        const { data: session } = await supabase
+            .from('chat_sessions')
+            .select('user_id')
+            .eq('id', sessionId)
+            .single();
+
+        if (!session || session.user_id !== req.user!.id) {
+            console.error('[Rename Session] Unauthorized access attempt:', {
+                requesterId: req.user!.id,
+                sessionOwnerId: session?.user_id,
+                sessionId,
+                sessionFound: !!session
+            });
+            return res.status(403).json({ success: false, error: 'Unauthorized' });
+        }
+
+        const { data, error } = await supabase
+            .from('chat_sessions')
+            .update({ title: title.trim() })
+            .eq('id', sessionId)
+            .select()
+            .single();
+
+        if (error) throw error;
+        res.json({ success: true, session: data });
+    } catch (error) {
+        res.status(500).json({ success: false, error: 'Failed to rename session' });
+    }
+});
+
 export default router;

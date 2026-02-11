@@ -11,7 +11,10 @@ import ingestRouter from './routes/ingest.js';
 import medicationRoutes from './routes/medication.js'; // [NEW]
 import sessionsRouter from './routes/sessions.js';
 import profileRouter from './routes/profile.js';
+import nutritionRouter from './routes/nutrition.js';
+import insightsRouter from './routes/insights.js';
 import { initEmbeddings } from './services/embeddings.js';
+import { startMedicationScheduler } from './services/medicationScheduler.js';
 
 // Load environment variables
 dotenv.config();
@@ -34,6 +37,8 @@ app.use('/api/medication', medicationRoutes); // [NEW]
 app.use('/api/chat', chatRouter);
 app.use('/api/sessions', sessionsRouter);
 app.use('/api/profile', profileRouter);
+app.use('/api/nutrition', nutritionRouter);
+app.use('/api/insights', insightsRouter);
 
 // Advanced Ingestion (Hybrid)
 import ingestAdvancedRouter from './routes/ingestAdvanced.js';
@@ -57,6 +62,9 @@ async function start() {
         console.error('Failed to initialize embeddings:', error);
         console.log('Server will continue, embeddings will load on first use');
     }
+
+    // Start Medication Notification Scheduler
+    await startMedicationScheduler();
 
     app.listen(Number(PORT), '0.0.0.0', () => {
         console.log(`🚀 Rex Healthify Backend running on port ${PORT}`);

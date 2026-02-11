@@ -88,7 +88,7 @@ router.post('/agentic', verifyFirebaseToken as any, async (req: FirebaseRequest,
         console.log(`${logPrefix} 💾 Step 4: Creating Database Entry...`);
         const document = await createDocument(userId, fileUrl, fileName, fileType);
 
-        // Update with validation info
+        // Update with validation info and extracted text
         const { supabase } = await import('../utils/supabase.js');
         await supabase
             .from('documents')
@@ -97,7 +97,8 @@ router.post('/agentic', verifyFirebaseToken as any, async (req: FirebaseRequest,
                 doc_category: validation.category,
                 parsing_method: 'llama_parse',
                 validation_confidence: validation.confidence,
-                rejection_reason: null
+                rejection_reason: null,
+                extracted_text: markdown // Store the full extracted text for AI analysis
             })
             .eq('id', document.id);
         console.log(`${logPrefix} ✅ Database Record Created (ID: ${document.id})`);

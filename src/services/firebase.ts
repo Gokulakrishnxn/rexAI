@@ -2,10 +2,12 @@ import { initializeApp } from "firebase/app";
 import {
     getAuth, initializeAuth,
     // @ts-ignore: getReactNativePersistence is available at runtime in Expo but sometimes missing from modular types
-    getReactNativePersistence
+    getReactNativePersistence,
+    browserLocalPersistence
 } from "firebase/auth";
 import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
 /**
  * FIREBASE CONFIGURATION INSTRUCTIONS:
@@ -24,9 +26,18 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 
-// Initialize Auth with AsyncStorage for persistence in Expo
+// Initialize Auth with persistence based on Platform
+// On Web, getReactNativePersistence might be undefined or incorrectly imported
+let persistence;
+
+if (Platform.OS === 'web') {
+    persistence = browserLocalPersistence;
+} else {
+    persistence = getReactNativePersistence(ReactNativeAsyncStorage);
+}
+
 export const auth = initializeAuth(app, {
-    persistence: getReactNativePersistence(ReactNativeAsyncStorage)
+    persistence
 });
 
 export default app;

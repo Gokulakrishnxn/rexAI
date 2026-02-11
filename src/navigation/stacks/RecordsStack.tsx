@@ -5,6 +5,7 @@ import { AddRecordScreen } from '../../screens/Records/AddRecordScreen';
 import { RecordDetailScreen } from '../../screens/Records/RecordDetailScreen';
 import { PrescriptionDetailScreen } from '../../screens/Records/PrescriptionDetailScreen';
 import { DocumentProcessingScreen } from '../../screens/Records/DocumentProcessingScreen';
+import { MedicalInsightsScreen } from '../../screens/Records/MedicalInsightsScreen';
 
 export type RecordsStackParamList = {
   RecordsDashboard: undefined;
@@ -12,6 +13,7 @@ export type RecordsStackParamList = {
   RecordDetail: { id: string };
   PrescriptionDetail: { id: string };
   DocumentProcessing: { fileUri: string; fileName: string; mimeType: string; userId: string };
+  MedicalInsights: { documentId: string; documentTitle: string; extractedText?: string };
 };
 
 const Stack = createNativeStackNavigator<RecordsStackParamList>();
@@ -29,6 +31,13 @@ export function RecordsStack() {
         options={{
           presentation: 'fullScreenModal',
           animation: 'fade',
+        }}
+      />
+      <Stack.Screen 
+        name="MedicalInsights" 
+        component={MedicalInsightsScreen}
+        options={{
+          animation: 'slide_from_right',
         }}
       />
     </Stack.Navigator>

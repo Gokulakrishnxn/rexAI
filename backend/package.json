@@ -21,6 +21,7 @@
         "llamaindex": "^0.12.1",
         "openai": "^4.24.0",
         "pdf-parse": "^2.4.5",
+        "resend": "^6.9.1",
         "tesseract.js": "^5.0.4",
         "tiktoken": "^1.0.12"
     },

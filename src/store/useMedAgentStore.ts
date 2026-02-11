@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { supabase } from '../services/supabase';
-import { fetchMedicationsList, deleteMedication as deleteMedicationApi } from '../services/api/backendApi';
+import { fetchMedicationsList, deleteMedication as deleteMedicationApi, markMedicationTaken } from '../services/api/backendApi';
 import type { Medication } from '../../types/medication';
 
 interface MedAgentState {
@@ -38,27 +38,27 @@ export const useMedAgentStore = create<MedAgentState>((set, get) => ({
   },
 
   markTaken: async (id) => {
-    // Local update
-    set((s) => ({ compliance: { ...s.compliance, [id]: true } }));
-
-    // Log to activity_logs (optional)
+    // 1. Backend update via API (Handles move to history & delete)
     try {
-      const userId = (await supabase.auth.getUser()).data.user?.id;
-      if (userId) {
-        await supabase.from('activity_logs').insert([{
-          user_id: userId,
-          description: `Took medication: ${get().activeMeds.find(m => m.id === id)?.drug_name || id}`,
-          activity_type: 'medication_intake'
-        }]);
+      const result = await markMedicationTaken(id);
+      if (!result.success) {
+        console.error('Failed to mark as taken:', result.error);
+        // Optional: Revert optimistic update if needed, but for now we proceed
+      } else {
+        // Log success or refresh if needed
       }
     } catch (error) {
-      console.log('Activity log failed (non-critical):', error);
+      console.log('Medication intake sync failed:', error);
     }
 
-    // Set timer to auto-delete after 5 minutes
+    // 2. Local status update for optimistic UI
+    set((s) => ({ compliance: { ...s.compliance, [id]: true } }));
+
+    // 3. Vanish effect: Remove from active list after 1 second
+    // This gives time for the 'vanish' animation in the UI
     const timer = setTimeout(() => {
       get().removeMedication(id);
-    }, 300000);
+    }, 1000);
 
     set((s) => ({
       completionTimers: { ...s.completionTimers, [id]: timer }
@@ -88,7 +88,7 @@ export const useMedAgentStore = create<MedAgentState>((set, get) => ({
     try {
       // Delete from database first
       const result = await deleteMedicationApi(id);
-      
+
       if (result.success) {
         // Then remove from local state
         get().removeMedication(id);

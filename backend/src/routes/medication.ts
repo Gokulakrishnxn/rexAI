@@ -4,6 +4,13 @@ import { verifyFirebaseToken } from '../middleware/firebase_auth.js';
 import { analyzeMedicationText } from '../services/medicationAI.js';
 import { supabase } from '../utils/supabase.js';
 import { extractTextFromImage, extractTextFromPdf } from '../services/ocr.js';
+import {
+    enrichMedicationWithRxNorm,
+    checkInteractions,
+    searchDrug,
+    getDrugDetails
+} from '../services/rxnormApi.js';
+import { refreshSchedulerState } from '../services/medicationScheduler.js';
 
 const router = express.Router();
 
@@ -148,6 +155,25 @@ router.post('/confirm', verifyFirebaseToken, async (req: any, res) => {
                 .single();
 
             if (medError) throw medError;
+            if (!medData) throw new Error('Failed to insert medication');
+
+            // Enrich with RxNorm data
+            let rxNormData = null;
+            try {
+                rxNormData = await enrichMedicationWithRxNorm(med.drug_name);
+                if (rxNormData) {
+                    // Update medication with RxNorm info
+                    await supabase
+                        .from('medications')
+                        .update({
+                            rxcui: rxNormData.rxcui,
+                            rxnorm_data: rxNormData
+                        })
+                        .eq('id', medData.id);
+                }
+            } catch (rxErr) {
+                console.warn('RxNorm enrichment failed:', rxErr);
+            }
 
             // 2. Insert Schedule
             const { error: schedError } = await supabase
@@ -165,20 +191,54 @@ router.post('/confirm', verifyFirebaseToken, async (req: any, res) => {
             results.push(medData);
         }
 
+        // Update scheduler state (wake up if needed)
+        refreshSchedulerState();
+
         res.json({ success: true, count: results.length, documentId });
+    } catch (error: any) {
+        console.error('Confirm medication failed:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * List Medications
+ */
+router.get('/list', verifyFirebaseToken, async (req: any, res) => {
     try {
         const userId = req.user.id; // Correct UUID from public.users
 
-        const { data, error } = await supabase
+        // Fetch medications with schedules
+        const { data: meds, error: medError } = await supabase
             .from('medications')
-            .select('*')
+            .select('*, medication_schedules(*)')
             .eq('user_id', userId)
-            .eq('status', 'active') // Fixed: Column name is 'status', not 'active'
+            .eq('status', 'active')
             .order('created_at', { ascending: false });
 
-        if (error) throw error;
+        if (medError) throw medError;
 
-        res.json({ success: true, medications: data });
+        // Fetch TODAY's intakes for these medications to know what's taken
+        const today = new Date().toISOString().split('T')[0];
+        const { data: intakes, error: intakeError } = await supabase
+            .from('medication_intakes')
+            .select('*')
+            .eq('user_id', userId)
+            .gte('taken_time', `${today}T00:00:00`)
+            .lte('taken_time', `${today}T23:59:59`);
+
+        if (intakeError) console.error('Error fetching daily intakes:', intakeError);
+
+        // Merge intakes into medications for easier frontend processing
+        const medicationsWithIntakes = meds.map(med => ({
+            ...med,
+            today_intakes: intakes?.filter(i =>
+                // Find intakes linked to this med's schedule
+                med.medication_schedules.some((s: any) => s.id === i.schedule_id)
+            ) || []
+        }));
+
+        res.json({ success: true, medications: medicationsWithIntakes });
     } catch (error: any) {
         console.error('Fetch medications failed:', error);
         res.status(500).json({ success: false, error: error.message });
@@ -194,10 +254,10 @@ router.post('/:id/take', verifyFirebaseToken, async (req: any, res) => {
         const medId = req.params.id;
         const { date = new Date().toISOString() } = req.body;
 
-        // Verify medication exists for user
+        // 1. Fetch medication details for snapshot
         const { data: med, error: medError } = await supabase
             .from('medications')
-            .select('drug_name, dosage')
+            .select('*')
             .eq('id', medId)
             .eq('user_id', userId)
             .single();
@@ -206,19 +266,60 @@ router.post('/:id/take', verifyFirebaseToken, async (req: any, res) => {
             return res.status(404).json({ success: false, error: 'Medication not found' });
         }
 
-        // Log to activity_logs
-        const { error: logError } = await supabase
+        // 2. Insert into medication_intakes with snapshot data
+        // We set schedule_id to NULL initially or try to find one, but since we are deleting,
+        // we might as well just log it as a historical record.
+        // However, if we want to query by schedule later (before delete), we need it.
+        // Let's try to get the schedule ID if it exists, otherwise null.
+        const { data: schedule } = await supabase
+            .from('medication_schedules')
+            .select('id')
+            .eq('medication_id', medId)
+            .single();
+
+        const { error: intakeError } = await supabase
+            .from('medication_intakes')
+            .insert({
+                user_id: userId,
+                schedule_id: schedule?.id || null, // Can be null now
+                drug_name: med.drug_name,
+                dosage: med.dosage,
+                form: med.form,
+                frequency_text: med.frequency_text,
+                scheduled_time: date, // Using taken time as scheduled time for now, or fetch from schedule
+                taken_time: date,
+                status: 'taken'
+            });
+
+        if (intakeError) throw intakeError;
+
+        // 3. Log to activity_logs (keep this for additional audit trail)
+        await supabase
             .from('activity_logs')
             .insert({
                 user_id: userId,
                 activity_type: 'medication_intake',
-                description: `Took ${med.drug_name} (${med.dosage})`,
-                metadata: { medication_id: medId, taken_at: date }
+                description: `Took and cleared: ${med.drug_name} (${med.dosage})`,
+                metadata: {
+                    medication_id: medId,
+                    taken_at: date,
+                    action: 'take_and_delete'
+                }
             });
 
-        if (logError) throw logError;
+        // 4. Delete the medication (Cascades to schedules, and sets intakes.schedule_id to NULL)
+        const { error: deleteError } = await supabase
+            .from('medications')
+            .delete()
+            .eq('id', medId)
+            .eq('user_id', userId);
 
-        res.json({ success: true, message: 'Medication logged as taken' });
+        if (deleteError) throw deleteError;
+
+        // Update scheduler state
+        refreshSchedulerState();
+
+        res.json({ success: true, message: 'Medication taken and cleared from active list' });
 
     } catch (error: any) {
         console.error('Take medication failed:', error);
@@ -275,6 +376,153 @@ router.delete('/:id', verifyFirebaseToken, async (req: any, res) => {
 
     } catch (error: any) {
         console.error('Delete medication failed:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * RxNorm Drug Search
+ */
+router.get('/rxnorm/search', verifyFirebaseToken, async (req: any, res) => {
+    try {
+        const { query } = req.query;
+
+        if (!query) {
+            return res.status(400).json({ success: false, error: 'Query required' });
+        }
+
+        const result = await searchDrug(query);
+        const drugs = result ? [result] : [];
+
+        res.json({
+            success: true,
+            drugs: drugs.map(d => ({
+                rxcui: d.rxcui,
+                name: d.name,
+                genericName: d.genericName
+            }))
+        });
+
+    } catch (error: any) {
+        console.error('RxNorm search failed:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * Get RxNorm Drug Details
+ */
+router.get('/rxnorm/:rxcui', verifyFirebaseToken, async (req: any, res) => {
+    try {
+        const { rxcui } = req.params;
+
+        const details = await getDrugDetails(rxcui);
+
+        if (!details) {
+            return res.status(404).json({ success: false, error: 'Drug not found' });
+        }
+
+        res.json({ success: true, drug: details });
+
+    } catch (error: any) {
+        console.error('RxNorm details failed:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * Check Drug Interactions
+ */
+router.post('/interactions', verifyFirebaseToken, async (req: any, res) => {
+    try {
+        const { rxcuiList } = req.body;
+        const userId = req.user.id;
+
+        // If no list provided, check user's active medications
+        let rxcuis = rxcuiList;
+
+        if (!rxcuis || rxcuis.length === 0) {
+            const { data: meds } = await supabase
+                .from('medications')
+                .select('rxcui')
+                .eq('user_id', userId)
+                .eq('status', 'active')
+                .not('rxcui', 'is', null);
+
+            rxcuis = meds?.map(m => m.rxcui).filter(Boolean) || [];
+        }
+
+        if (rxcuis.length < 2) {
+            return res.json({
+                success: true,
+                interactions: [],
+                message: 'Need at least 2 medications to check interactions'
+            });
+        }
+
+        const interactions = await checkInteractions(rxcuis);
+
+        res.json({
+            success: true,
+            interactions,
+            checkedMedications: rxcuis.length
+        });
+
+    } catch (error: any) {
+        console.error('Interaction check failed:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * Enrich existing medication with RxNorm data
+ */
+router.post('/:id/enrich', verifyFirebaseToken, async (req: any, res) => {
+    try {
+        const userId = req.user.id;
+        const medId = req.params.id;
+
+        // Get medication
+        const { data: med, error: medError } = await supabase
+            .from('medications')
+            .select('*')
+            .eq('id', medId)
+            .eq('user_id', userId)
+            .single();
+
+        if (medError || !med) {
+            return res.status(404).json({ success: false, error: 'Medication not found' });
+        }
+
+        // Enrich with RxNorm
+        const rxNormData = await enrichMedicationWithRxNorm(med.drug_name);
+
+        if (!rxNormData) {
+            return res.json({
+                success: false,
+                error: 'Could not find RxNorm data for this medication'
+            });
+        }
+
+        // Update medication
+        const { error: updateError } = await supabase
+            .from('medications')
+            .update({
+                rxcui: rxNormData.rxcui,
+                rxnorm_data: rxNormData
+            })
+            .eq('id', medId);
+
+        if (updateError) throw updateError;
+
+        res.json({
+            success: true,
+            rxNormData,
+            message: 'Medication enriched with RxNorm data'
+        });
+
+    } catch (error: any) {
+        console.error('Enrich medication failed:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });

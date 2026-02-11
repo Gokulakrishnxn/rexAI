@@ -4,7 +4,7 @@ import { CoachChatScreen } from '../../screens/Coach/CoachChatScreen';
 import { VoiceAssistantScreen } from '../../screens/Coach/VoiceAssistantScreen';
 
 export type CoachStackParamList = {
-  CoachChat: undefined;
+  CoachChat: { documentId?: string; documentTitle?: string } | undefined;
   VoiceAssistant: undefined;
 };
 

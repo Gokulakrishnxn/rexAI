@@ -40,6 +40,7 @@ export const useRecordsStore = create<RecordsState>((set) => ({
         title: d.file_name,
         date: new Date(d.created_at).toISOString().split('T')[0],
         summary: d.summary || 'No summary available',
+        rawText: d.extracted_text, // Include extracted text for AI analysis
         doctor: 'Unknown', // Backend doesn't store this yet
         ingestionStatus: d.validation_status === 'verified' ? 'complete' : 'pending',
         supabaseUrl: d.file_url,

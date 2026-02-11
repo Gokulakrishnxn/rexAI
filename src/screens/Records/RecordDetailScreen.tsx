@@ -91,10 +91,11 @@ export function RecordDetailScreen() {
 
   const handleAnalyzeWithAI = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    // Navigate to chat with this document context
-    navigation.navigate('RexAI', {
-      screen: 'CoachChat',
-      params: { documentId: record?.documentId, documentTitle: record?.title }
+    // Navigate to Medical Insights screen for deep analysis
+    navigation.navigate('MedicalInsights', {
+      documentId: record?.documentId || id,
+      documentTitle: record?.title || 'Medical Document',
+      extractedText: record?.rawText,
     });
   };
 

@@ -1,448 +1,597 @@
-# Medical Records Data Flow Documentation
+# RexAI Complete System Flow Documentation
 
-This document explains the complete data flow for medical records/documents in the RexAI application - from storage to display.
-
----
-
-## Overview
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            DATA FLOW OVERVIEW                                │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   ┌──────────┐     ┌──────────────┐     ┌──────────┐     ┌──────────────┐   │
-│   │ Supabase │ ──► │   Backend    │ ──► │  Zustand │ ──► │    React     │   │
-│   │    DB    │     │   Express    │     │   Store  │     │   Screens    │   │
-│   └──────────┘     └──────────────┘     └──────────┘     └──────────────┘   │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+This document explains the complete end-to-end AI processing flows for the RexAI health application - covering document ingestion, OCR, medical analysis, medication decoding, nutrition tracking, and AI insights.
 
 ---
 
-## 1. Data Storage Layer (Supabase)
+## System Architecture Overview
 
-### Database Schema
-
-**`documents` table:**
-```sql
-id              UUID PRIMARY KEY
-user_id         UUID (references auth.users)
-file_url        TEXT (Supabase Storage public URL)
-file_name       TEXT
-file_type       TEXT (mime type)
-summary         TEXT (AI-generated summary)
-doc_category    TEXT ('lab', 'prescription', 'imaging', 'other')
-validation_status TEXT ('pending', 'verified', 'rejected')
-created_at      TIMESTAMP
 ```
-
-**`document_chunks` table:**
-```sql
-id              UUID PRIMARY KEY
-document_id     UUID (references documents)
-user_id         UUID
-chunk_index     INTEGER
-content         TEXT
-embedding       VECTOR(1536)
-created_at      TIMESTAMP
-```
-
-### File Storage
-
-Files are stored in **Supabase Storage** under:
-```
-medical-records/{user_id}/{timestamp}_{filename}
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                              REXAI SYSTEM ARCHITECTURE                                   │
+├─────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                          │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐           │
+│  │  React Native │    │   Express    │    │   Supabase   │    │  External    │           │
+│  │   Frontend    │◄──►│   Backend    │◄──►│   Database   │    │    APIs      │           │
+│  └──────────────┘    └──────┬───────┘    └──────────────┘    └──────┬───────┘           │
+│                              │                                       │                   │
+│                              ▼                                       │                   │
+│                    ┌─────────────────────────────────────────────────┘                   │
+│                    │                                                                     │
+│         ┌──────────┼──────────┬──────────┬──────────┬──────────┐                        │
+│         ▼          ▼          ▼          ▼          ▼          ▼                        │
+│    ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐              │
+│    │LlamaParse│ │ OpenAI  │ │ Gemini  │ │ RxNorm  │ │  USDA   │ │Tesseract│              │
+│    │   OCR   │ │GPT-3.5/4│ │Fallback │ │  API    │ │   API   │ │Fallback │              │
+│    └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘              │
+│                                                                                          │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 2. Backend API Layer
+## 🔁 Complete AI Processing Flows
 
-### File Location
+---
+
+## Flow 1: Document Ingestion
+
 ```
-backend/src/routes/ingest.ts
-backend/src/services/vectorStore.ts
+┌────────────────────────────────────────────────────────────────────────────────┐
+│                       🧾 DOCUMENT INGESTION FLOW                                │
+├────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  ┌─────────────────────┐                                                        │
+│  │ 1. User uploads     │  PDF, Image, or Photo                                  │
+│  │    prescription/    │  via DocumentPicker                                    │
+│  │    report           │                                                        │
+│  └─────────┬───────────┘                                                        │
+│            │                                                                    │
+│            ▼                                                                    │
+│  ┌─────────────────────┐                                                        │
+│  │ 2. Upload to        │  Path: medical-records/{user_id}/{timestamp}_{file}    │
+│  │    Supabase Storage │  Returns: public URL                                   │
+│  └─────────┬───────────┘                                                        │
+│            │                                                                    │
+│            ▼                                                                    │
+│  ┌─────────────────────┐                                                        │
+│  │ 3. POST /api/ingest │  Body: { fileUrl, fileName, fileType }                 │
+│  │    (Backend)        │  Starts processing job                                 │
+│  └─────────┬───────────┘                                                        │
+│            │                                                                    │
+│            ▼                                                                    │
+│       [ Continue to OCR & Validation Flow ]                                     │
+│                                                                                 │
+└────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### API Endpoints
+**Key Files:**
+| Component | Path |
+|-----------|------|
+| Upload Service | `src/services/supabase.ts` → `uploadToStorage()` |
+| API Client | `src/services/api/backendApi.ts` → `triggerIngestion()` |
+| Processing Screen | `src/screens/Records/DocumentProcessingScreen.tsx` |
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/ingest` | List all user documents |
-| POST | `/api/ingest/agentic` | Upload & process new document |
-| DELETE | `/api/ingest/:documentId` | Delete a document |
+---
 
-### GET /api/ingest - Fetch Documents
+## Flow 2: OCR & Validation
 
+```
+┌────────────────────────────────────────────────────────────────────────────────┐
+│                       🧠 OCR & VALIDATION FLOW                                  │
+├────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  ┌─────────────────────┐                                                        │
+│  │ 4. LlamaParse OCR   │  PRIMARY: Cloud API for high-quality parsing           │
+│  │    (Primary)        │  Extracts text/markdown from PDF/images                │
+│  └─────────┬───────────┘                                                        │
+│            │                                                                    │
+│            ├─── SUCCESS ─────────────────────────────────────┐                  │
+│            │                                                 │                  │
+│            ▼ (FAILURE)                                       │                  │
+│  ┌─────────────────────┐                                     │                  │
+│  │ 5. Tesseract.js     │  FALLBACK: Local OCR engine         │                  │
+│  │    (Fallback)       │  Node.js native OCR                 │                  │
+│  └─────────┬───────────┘                                     │                  │
+│            │                                                 │                  │
+│            ▼◄────────────────────────────────────────────────┘                  │
+│  ┌─────────────────────┐                                                        │
+│  │ 6. Medical          │  Prompt: "Is this a medical document?"                 │
+│  │    Validation       │  Model: GPT-3.5-turbo (OpenAI)                         │
+│  │    (AI Guardrail)   │                                                        │
+│  └─────────┬───────────┘                                                        │
+│            │                                                                    │
+│            ├─── is_medical: false ──► REJECT (400 Error)                        │
+│            │    reason: "Not a valid medical document"                          │
+│            │                                                                    │
+│            ▼ (is_medical: true)                                                 │
+│  ┌─────────────────────┐                                                        │
+│  │ Document Tagged     │  category: 'prescription' | 'lab' | 'imaging'          │
+│  │ with Type           │  confidence: 0.0 - 1.0                                 │
+│  └─────────┬───────────┘                                                        │
+│            │                                                                    │
+│            ▼                                                                    │
+│       [ Continue to Medical Analysis Pipeline ]                                 │
+│                                                                                 │
+└────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Validation Response Structure:**
 ```typescript
-// backend/src/routes/ingest.ts
-router.get('/', verifyFirebaseToken, async (req, res) => {
-    const userId = req.user.id;
-    const documents = await getUserDocuments(userId);
-    res.json({ success: true, documents });
-});
-```
-
-### getUserDocuments Service
-
-```typescript
-// backend/src/services/vectorStore.ts
-export async function getUserDocuments(userId: string) {
-    const { data } = await supabase
-        .from('documents')
-        .select()
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
-    return data || [];
+{
+  is_medical: boolean;
+  category: 'prescription' | 'lab_report' | 'imaging' | 'discharge_summary' | 'other';
+  confidence: number;  // 0.0 - 1.0
+  reason: string;      // Explanation for the decision
 }
 ```
 
+**Key Files:**
+| Component | Path |
+|-----------|------|
+| LlamaParse Service | `backend/src/services/llamaParse.ts` |
+| Tesseract Fallback | `backend/src/services/ocr.ts` |
+| Validation AI | `backend/src/services/validationAI.ts` |
+| Ingest Route | `backend/src/routes/ingestAdvanced.ts` |
+
 ---
 
-## 3. Frontend API Client
+## Flow 3: Medical Analysis Pipeline
 
-### File Location
 ```
-src/services/api/backendApi.ts
+┌────────────────────────────────────────────────────────────────────────────────┐
+│                       🧬 MEDICAL ANALYSIS PIPELINE                              │
+├────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  ┌─────────────────────┐                                                        │
+│  │ 7. Text Chunking    │  Strategy: 256 tokens per chunk                        │
+│  │                     │  Overlap: 50 tokens (for context continuity)           │
+│  └─────────┬───────────┘                                                        │
+│            │                                                                    │
+│            ▼                                                                    │
+│  ┌─────────────────────┐                                                        │
+│  │ 8. Generate         │  Model: OpenAI text-embedding-ada-002                  │
+│  │    Embeddings       │  OR: Xenova/all-MiniLM-L6-v2 (local)                   │
+│  │                     │  Output: 1536-dim vectors                              │
+│  └─────────┬───────────┘                                                        │
+│            │                                                                    │
+│            ▼                                                                    │
+│  ┌─────────────────────┐                                                        │
+│  │ 9. Store Chunks     │  Table: document_chunks                                │
+│  │    with Embeddings  │  Enables semantic search via pgvector                  │
+│  └─────────┬───────────┘                                                        │
+│            │                                                                    │
+│            ▼                                                                    │
+│  ┌─────────────────────┐                                                        │
+│  │ 10. Medical Entity  │  Optional: BioGPT / PubMedBERT                         │
+│  │     Extraction      │  Extract: conditions, symptoms, diagnoses              │
+│  └─────────┬───────────┘                                                        │
+│            │                                                                    │
+│            ▼                                                                    │
+│  ┌─────────────────────┐                                                        │
+│  │ 11. Generate        │  Model: GPT-4 / Gemini                                 │
+│  │     AI Summary      │  Output: Structured medical summary                    │
+│  └─────────┬───────────┘                                                        │
+│            │                                                                    │
+│            ▼                                                                    │
+│  ┌─────────────────────┐                                                        │
+│  │ 12. Store Insights  │  Tables: documents.summary, conditions                 │
+│  │     in Database     │  Fields: condition, explanation, suggested_actions     │
+│  └─────────────────────┘                                                        │
+│                                                                                 │
+└────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### fetchUserDocuments Function
-
+**Chunking Configuration:**
 ```typescript
-export const fetchUserDocuments = async (): Promise<any[]> => {
-    const response = await fetch(`${getBackendUrl()}/api/ingest`, {
-        headers: await getHeaders(), // Includes Firebase Auth token
-    });
-    const data = await response.json();
-    return data.success ? data.documents : [];
+const CHUNK_CONFIG = {
+  maxTokens: 256,
+  overlapTokens: 50,
+  separator: '\n\n'
 };
 ```
 
----
-
-## 4. State Management (Zustand Store)
-
-### File Location
-```
-src/store/useRecordsStore.ts
-```
-
-### Store Structure
-
-```typescript
-interface RecordsState {
-    records: HealthRecord[];
-    fetchRecords: () => Promise<void>;
-    addRecord: (record: HealthRecord) => void;
-    updateRecord: (id: string, updates: Partial<HealthRecord>) => void;
-    removeRecord: (id: string) => void;
-}
-```
-
-### HealthRecord Type
-
-```typescript
-// types/record.ts
-interface HealthRecord {
-    id: string;
-    type: 'lab' | 'prescription' | 'imaging' | 'other';
-    title: string;
-    date: string;
-    summary?: string;
-    doctor?: string;
-    supabaseUrl?: string;      // Image/file URL
-    documentId?: string;        // Backend document ID
-    ingestionStatus: 'pending' | 'uploading' | 'processing' | 'complete' | 'error';
-}
-```
-
-### fetchRecords Implementation
-
-```typescript
-fetchRecords: async () => {
-    const docs = await fetchUserDocuments();
-    const formatted: HealthRecord[] = docs.map((d) => ({
-        id: d.id,
-        type: d.doc_category || 'other',
-        title: d.file_name,
-        date: new Date(d.created_at).toISOString().split('T')[0],
-        summary: d.summary,
-        ingestionStatus: d.validation_status === 'verified' ? 'complete' : 'pending',
-        supabaseUrl: d.file_url,    // ◄── Image URL for display
-        documentId: d.id,
-    }));
-    set({ records: formatted });
-}
-```
+**Key Files:**
+| Component | Path |
+|-----------|------|
+| Chunker Service | `backend/src/services/chunker.ts` |
+| Embeddings Service | `backend/src/services/embeddings.ts` |
+| Vector Store | `backend/src/services/vectorStore.ts` |
+| ChatGPT Service | `backend/src/services/chatgpt.ts` |
 
 ---
 
-## 5. UI Components
-
-### Screen Files
-```
-src/screens/Records/RecordsDashboardScreen.tsx  → List view
-src/screens/Records/RecordDetailScreen.tsx      → Detail view
-```
-
----
-
-## Complete Data Flow Diagram
+## Flow 4: Medication Decoding (RxNorm)
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────┐
-│                         RECORDS LIST FLOW                                       │
+│                       💊 MEDICATION DECODING FLOW                               │
 ├────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                 │
 │  ┌─────────────────────┐                                                        │
-│  │ RecordsDashboard    │                                                        │
-│  │ Screen loads        │                                                        │
+│  │ 12. Detect Medicine │  Methods:                                              │
+│  │     Names           │  - Regex patterns (mg, ml, tablet, capsule)            │
+│  │                     │  - NER extraction via LLM                              │
+│  │                     │  - AI prompt: "List all medications mentioned"         │
 │  └─────────┬───────────┘                                                        │
 │            │                                                                    │
 │            ▼                                                                    │
 │  ┌─────────────────────┐                                                        │
-│  │ useEffect calls     │                                                        │
-│  │ fetchRecords()      │                                                        │
+│  │ 13. Query RxNorm    │  API: https://rxnav.nlm.nih.gov/REST/                  │
+│  │     API             │                                                        │
 │  └─────────┬───────────┘                                                        │
 │            │                                                                    │
-│            ▼                                                                    │
-│  ┌─────────────────────┐     HTTP GET      ┌─────────────────────┐             │
-│  │ fetchUserDocuments  │ ───────────────►  │ Backend             │             │
-│  │ (backendApi.ts)     │                   │ /api/ingest         │             │
-│  └─────────────────────┘                   └──────────┬──────────┘             │
-│                                                       │                         │
-│                                                       ▼                         │
-│                                            ┌─────────────────────┐             │
-│                                            │ getUserDocuments    │             │
-│                                            │ (vectorStore.ts)    │             │
-│                                            └──────────┬──────────┘             │
-│                                                       │                         │
-│                                                       ▼                         │
-│                                            ┌─────────────────────┐             │
-│                                            │ Supabase            │             │
-│                                            │ documents table     │             │
-│                                            └──────────┬──────────┘             │
-│                                                       │                         │
-│            ┌──────────────────────────────────────────┘                         │
-│            │  JSON Response                                                     │
-│            ▼                                                                    │
-│  ┌─────────────────────┐                                                        │
-│  │ Zustand Store       │                                                        │
-│  │ set({ records })    │                                                        │
-│  └─────────┬───────────┘                                                        │
+│            │  Endpoints Used:                                                   │
+│            │  ┌───────────────────────────────────────────────────────┐         │
+│            │  │ /drugs.json?name={drugName}                           │         │
+│            │  │   → Get rxcui, brand names, generics                  │         │
+│            │  │                                                       │         │
+│            │  │ /rxcui/{rxcui}/allrelated.json                        │         │
+│            │  │   → Get ingredients, dosage forms, interactions       │         │
+│            │  │                                                       │         │
+│            │  │ /interaction/list.json?rxcuis={rxcui1}+{rxcui2}       │         │
+│            │  │   → Check drug-drug interactions                      │         │
+│            │  └───────────────────────────────────────────────────────┘         │
 │            │                                                                    │
 │            ▼                                                                    │
 │  ┌─────────────────────┐                                                        │
-│  │ Component re-render │                                                        │
-│  │ Display cards       │                                                        │
+│  │ 14. Store in        │  Table: medications                                    │
+│  │     Supabase        │  Fields: drug_name, rxcui, purpose, side_effects       │
 │  └─────────────────────┘                                                        │
 │                                                                                 │
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
+**RxNorm Response Example:**
+```json
+{
+  "drugGroup": {
+    "name": "amoxicillin",
+    "conceptGroup": [{
+      "tty": "SBD",
+      "conceptProperties": [{
+        "rxcui": "308182",
+        "name": "Amoxicillin 500 MG Oral Capsule",
+        "synonym": "Amoxil"
+      }]
+    }]
+  }
+}
+```
+
+**Key Files:**
+| Component | Path |
+|-----------|------|
+| Medication AI | `backend/src/services/medicationAI.ts` |
+| Medication Route | `backend/src/routes/medication.ts` |
+| Frontend Store | `src/store/useMedAgentStore.ts` |
+
 ---
 
-## Record Detail Flow (On Card Click)
+## Flow 5: Food/Nutrition Pipeline (Optional)
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────┐
-│                         RECORD DETAIL FLOW                                      │
+│                       🥗 FOOD/NUTRITION PIPELINE                                │
 ├────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                 │
-│  User taps document card                                                        │
-│            │                                                                    │
-│            ▼                                                                    │
 │  ┌─────────────────────┐                                                        │
-│  │ navigation.navigate │                                                        │
-│  │ ('RecordDetail',    │                                                        │
-│  │  { id: doc.id })    │                                                        │
+│  │ 15. Food Image      │  User uploads food photo                               │
+│  │     Upload          │  OR selects from gallery                               │
 │  └─────────┬───────────┘                                                        │
 │            │                                                                    │
 │            ▼                                                                    │
 │  ┌─────────────────────┐                                                        │
-│  │ RecordDetailScreen  │                                                        │
-│  │ useRoute() gets id  │                                                        │
+│  │ 16. Image           │  Model: GPT-4 Vision / Gemini Vision                   │
+│  │     Classification  │  Prompt: "What food is shown in this image?"           │
 │  └─────────┬───────────┘                                                        │
 │            │                                                                    │
 │            ▼                                                                    │
 │  ┌─────────────────────┐                                                        │
-│  │ useRecordsStore()   │◄── NO new API call!                                   │
-│  │ records.find(id)    │    Data already in memory                             │
+│  │ 17. User            │  "Is this Chicken Biryani?"                            │
+│  │     Confirmation    │  User can correct if wrong                             │
 │  └─────────┬───────────┘                                                        │
 │            │                                                                    │
 │            ▼                                                                    │
 │  ┌─────────────────────┐                                                        │
-│  │ Render Detail View  │                                                        │
-│  │ - Image from        │                                                        │
-│  │   record.supabaseUrl│                                                        │
-│  │ - Summary from      │                                                        │
-│  │   record.summary    │                                                        │
-│  │ - Status badge      │                                                        │
+│  │ 18. Search USDA     │  API: https://api.nal.usda.gov/fdc/v1/foods/search     │
+│  │     FoodData API    │  Query: ?query={food_name}&api_key={key}               │
+│  └─────────┬───────────┘                                                        │
+│            │                                                                    │
+│            │  Response includes:                                                │
+│            │  ┌─────────────────────────────────────────────────────┐           │
+│            │  │ fdcId: 12345                                        │           │
+│            │  │ description: "Chicken biryani, cooked"              │           │
+│            │  │ foodNutrients: [                                    │           │
+│            │  │   { nutrientName: "Protein", value: 25, unit: "g" } │           │
+│            │  │   { nutrientName: "Carbs", value: 45, unit: "g" }   │           │
+│            │  │   { nutrientName: "Fat", value: 12, unit: "g" }     │           │
+│            │  │   { nutrientName: "Calories", value: 350 }          │           │
+│            │  │ ]                                                   │           │
+│            │  └─────────────────────────────────────────────────────┘           │
+│            │                                                                    │
+│            ▼                                                                    │
+│  ┌─────────────────────┐                                                        │
+│  │ 19. Store in        │  Table: food_nutrition                                 │
+│  │     Supabase        │  Fields: food_name, fdcId, protein, carbs, vitamins    │
 │  └─────────────────────┘                                                        │
 │                                                                                 │
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
----
-
-## Key Code Locations
-
-| Component | File Path |
-|-----------|-----------|
-| Dashboard Screen | `src/screens/Records/RecordsDashboardScreen.tsx` |
-| Detail Screen | `src/screens/Records/RecordDetailScreen.tsx` |
-| Zustand Store | `src/store/useRecordsStore.ts` |
-| API Client | `src/services/api/backendApi.ts` |
-| Record Type | `types/record.ts` |
-| Backend Route | `backend/src/routes/ingest.ts` |
-| DB Service | `backend/src/services/vectorStore.ts` |
+**USDA API Endpoints:**
+| Endpoint | Purpose |
+|----------|---------|
+| `/foods/search` | Search foods by name |
+| `/food/{fdcId}` | Get detailed nutrition info |
+| `/foods/list` | List foods by category |
 
 ---
 
-## Document Upload Flow
+## Flow 6: AI Insight Generation
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────┐
-│                         DOCUMENT UPLOAD FLOW                                    │
+│                       📊 AI INSIGHT GENERATION                                  │
 ├────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                 │
-│  1. User picks file (DocumentPicker)                                           │
+│  ┌─────────────────────┐                                                        │
+│  │ 19. Prepare Context │  Gather:                                               │
+│  │                     │  - Document chunks (semantic search)                   │
+│  │                     │  - User medical history                                │
+│  │                     │  - Medication interactions                             │
+│  └─────────┬───────────┘                                                        │
 │            │                                                                    │
 │            ▼                                                                    │
-│  2. Navigate to DocumentProcessingScreen                                        │
-│     with { fileUri, fileName, mimeType, userId }                                │
-│            │                                                                    │
-│            ▼                                                                    │
-│  3. Upload to Supabase Storage                                                  │
-│     uploadToStorage() → returns { url, path }                                   │
-│            │                                                                    │
-│            ▼                                                                    │
-│  4. Call Backend /api/ingest/agentic                                            │
-│     POST { fileUrl, fileName, fileType }                                        │
+│  ┌─────────────────────┐                                                        │
+│  │ 20. AI Analysis     │  Models: GPT-4 (Primary) / Gemini (Fallback)           │
+│  │                     │                                                        │
+│  │     Prompts:        │                                                        │
+│  │     ┌─────────────────────────────────────────────────────┐                 │
+│  │     │ • "What is this report about?"                      │                 │
+│  │     │ • "What are possible consequences if untreated?"    │                 │
+│  │     │ • "Estimated recovery time?"                        │                 │
+│  │     │ • "Which foods and activities help?"                │                 │
+│  │     │ • "Any medication interactions to watch?"           │                 │
+│  │     └─────────────────────────────────────────────────────┘                 │
+│  └─────────┬───────────┘                                                        │
 │            │                                                                    │
 │            ▼                                                                    │
 │  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │  Backend Processing (ingestAdvanced.ts)                                  │   │
+│  │ 21. Return Structured JSON Response                                      │   │
 │  │                                                                          │   │
-│  │  5. Download file from URL                                               │   │
-│  │            │                                                             │   │
-│  │            ▼                                                             │   │
-│  │  6. OCR with LlamaParse                                                  │   │
-│  │     Extract text/markdown                                                │   │
-│  │            │                                                             │   │
-│  │            ▼                                                             │   │
-│  │  7. Medical Validation (GPT-3.5)                                         │   │
-│  │     Check if document is medical                                         │   │
-│  │     Return { is_medical, category, reason }                              │   │
-│  │            │                                                             │   │
-│  │            ├─── NOT MEDICAL ──► Return 400 Error                         │   │
-│  │            │                                                             │   │
-│  │            ▼ (IS MEDICAL)                                                │   │
-│  │  8. Create document record in DB                                         │   │
-│  │            │                                                             │   │
-│  │            ▼                                                             │   │
-│  │  9. Chunk text (256 tokens, 50 overlap)                                  │   │
-│  │            │                                                             │   │
-│  │            ▼                                                             │   │
-│  │  10. Generate embeddings (OpenAI text-embedding-ada-002)                 │   │
-│  │            │                                                             │   │
-│  │            ▼                                                             │   │
-│  │  11. Store chunks with embeddings in document_chunks                     │   │
-│  │            │                                                             │   │
-│  │            ▼                                                             │   │
-│  │  12. Generate summary (GPT-4) - async                                    │   │
-│  │            │                                                             │   │
-│  │            ▼                                                             │   │
-│  │  13. Return { success, documentId, summary }                             │   │
+│  │  {                                                                       │   │
+│  │    "summary": {                                                          │   │
+│  │      "title": "Blood Test Results Analysis",                             │   │
+│  │      "overview": "Your cholesterol levels are elevated...",              │   │
+│  │      "sections": [                                                       │   │
+│  │        { "header": "Key Findings", "content": "..." },                   │   │
+│  │        { "header": "Risk Assessment", "content": "..." }                 │   │
+│  │      ]                                                                   │   │
+│  │    },                                                                    │   │
+│  │    "charts": {                                                           │   │
+│  │      "vitals": [                                                         │   │
+│  │        { "label": "LDL", "value": 145, "max": 100, "status": "high" }    │   │
+│  │      ],                                                                  │   │
+│  │      "adherence": { "percentage": 85, "label": "Medicine Adherence" }    │   │
+│  │    },                                                                    │   │
+│  │    "actions": [                                                          │   │
+│  │      { "priority": "high", "action": "Reduce saturated fat intake" },    │   │
+│  │      { "priority": "medium", "action": "Exercise 30 mins daily" }        │   │
+│  │    ]                                                                     │   │
+│  │  }                                                                       │   │
+│  │                                                                          │   │
 │  └─────────────────────────────────────────────────────────────────────────┘   │
-│            │                                                                    │
-│            ▼                                                                    │
-│  14. Update local record in Zustand store                                       │
-│            │                                                                    │
-│            ▼                                                                    │
-│  15. Navigate back to RecordsDashboard                                          │
 │                                                                                 │
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
----
-
-## Delete Document Flow
-
-```
-┌────────────────────────────────────────────────────────────────────────────────┐
-│                         DELETE DOCUMENT FLOW                                    │
-├────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                 │
-│  1. User taps Trash icon in RecordDetailScreen                                  │
-│            │                                                                    │
-│            ▼                                                                    │
-│  2. Show confirmation Alert                                                     │
-│            │                                                                    │
-│            ▼ (User confirms)                                                    │
-│  3. Call deleteDocument(documentId)                                             │
-│     DELETE /api/ingest/:documentId                                              │
-│            │                                                                    │
-│            ▼                                                                    │
-│  4. Backend deletes from documents table                                        │
-│     (chunks auto-delete via CASCADE)                                            │
-│            │                                                                    │
-│            ▼                                                                    │
-│  5. removeRecord(id) from Zustand store                                         │
-│            │                                                                    │
-│            ▼                                                                    │
-│  6. navigation.goBack() to dashboard                                            │
-│                                                                                 │
-└────────────────────────────────────────────────────────────────────────────────┘
-```
+**Display Components:**
+| Visualization | Purpose |
+|---------------|---------|
+| Summary Cards | Sectioned text with headers |
+| Vertical Bar Chart | Vitals, nutrient levels |
+| Circular Progress | Medicine adherence, goals |
+| Action List | Prioritized recommendations |
 
 ---
 
-## Image Display
+## 🗂️ Database Schema
 
-The document image is displayed using the `supabaseUrl` field:
+### Supabase Tables
 
-```typescript
-// RecordDetailScreen.tsx
-const imageUrl = record.supabaseUrl || record.fileUri;
+```sql
+-- Core Documents
+CREATE TABLE documents (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID REFERENCES auth.users(id),
+    file_url        TEXT NOT NULL,
+    file_name       TEXT NOT NULL,
+    file_type       TEXT,
+    summary         TEXT,
+    doc_category    TEXT,  -- 'prescription', 'lab', 'imaging', 'other'
+    validation_status TEXT DEFAULT 'pending',  -- 'pending', 'verified', 'rejected'
+    validation_confidence FLOAT,
+    rejection_reason TEXT,
+    parsing_method  TEXT,  -- 'llama_parse', 'tesseract', 'manual'
+    created_at      TIMESTAMP DEFAULT NOW()
+);
 
-<Image
-    source={{ uri: imageUrl }}
-    style={styles.documentImage}
-    resizeMode="cover"
-/>
+-- Vector Embeddings for RAG
+CREATE TABLE document_chunks (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    document_id     UUID REFERENCES documents(id) ON DELETE CASCADE,
+    user_id         UUID REFERENCES auth.users(id),
+    chunk_index     INTEGER NOT NULL,
+    content         TEXT NOT NULL,
+    embedding       VECTOR(1536),  -- pgvector extension
+    created_at      TIMESTAMP DEFAULT NOW()
+);
+
+-- Medical Conditions Extracted
+CREATE TABLE conditions (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID REFERENCES auth.users(id),
+    document_id     UUID REFERENCES documents(id),
+    condition       TEXT NOT NULL,
+    explanation     TEXT,
+    severity        TEXT,  -- 'low', 'medium', 'high'
+    suggested_actions JSONB,
+    created_at      TIMESTAMP DEFAULT NOW()
+);
+
+-- Medications (RxNorm Enhanced)
+CREATE TABLE medications (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID REFERENCES auth.users(id),
+    drug_name       TEXT NOT NULL,
+    rxcui           TEXT,  -- RxNorm Concept Unique Identifier
+    generic_name    TEXT,
+    brand_names     TEXT[],
+    dosage          TEXT,
+    frequency       TEXT,
+    purpose         TEXT,
+    side_effects    TEXT[],
+    interactions    JSONB,
+    start_date      DATE,
+    end_date        DATE,
+    is_active       BOOLEAN DEFAULT true,
+    created_at      TIMESTAMP DEFAULT NOW()
+);
+
+-- Food/Nutrition Tracking
+CREATE TABLE food_nutrition (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID REFERENCES auth.users(id),
+    food_name       TEXT NOT NULL,
+    fdc_id          TEXT,  -- USDA FoodData Central ID
+    serving_size    TEXT,
+    calories        FLOAT,
+    protein_g       FLOAT,
+    carbs_g         FLOAT,
+    fat_g           FLOAT,
+    fiber_g         FLOAT,
+    vitamins        JSONB,
+    minerals        JSONB,
+    logged_at       TIMESTAMP DEFAULT NOW()
+);
+
+-- AI-Generated Insights
+CREATE TABLE insights (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID REFERENCES auth.users(id),
+    document_id     UUID REFERENCES documents(id),
+    insight_type    TEXT,  -- 'summary', 'risk', 'recommendation'
+    ai_summary      TEXT,
+    action_list     JSONB,
+    chart_data      JSONB,  -- For visualization
+    model_used      TEXT,   -- 'gpt-4', 'gemini-pro'
+    created_at      TIMESTAMP DEFAULT NOW()
+);
+
+-- Enable pgvector for semantic search
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- Index for fast similarity search
+CREATE INDEX ON document_chunks 
+USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 ```
 
-The URL points to Supabase Storage:
+---
+
+## External APIs Reference
+
+| API | Purpose | Base URL |
+|-----|---------|----------|
+| **RxNorm** | Medication lookup | `https://rxnav.nlm.nih.gov/REST/` |
+| **USDA FoodData** | Nutrition info | `https://api.nal.usda.gov/fdc/v1/` |
+| **OpenAI** | GPT-4, Embeddings | `https://api.openai.com/v1/` |
+| **Google Gemini** | Fallback AI | `https://generativelanguage.googleapis.com/` |
+| **LlamaParse** | Document OCR | `https://api.cloud.llamaindex.ai/` |
+
+---
+
+## File Structure Reference
+
 ```
-https://[project-id].supabase.co/storage/v1/object/public/medical-records/[user-id]/[filename]
+rexAI/
+├── src/                              # React Native Frontend
+│   ├── screens/
+│   │   ├── Records/
+│   │   │   ├── RecordsDashboardScreen.tsx   # Document list
+│   │   │   ├── RecordDetailScreen.tsx       # Document detail view
+│   │   │   └── DocumentProcessingScreen.tsx # Upload progress
+│   │   └── Medication/
+│   │       ├── MedicationListScreen.tsx     # Active medications
+│   │       └── MedicationReviewScreen.tsx   # Prescription review
+│   ├── services/
+│   │   └── api/
+│   │       └── backendApi.ts                # API client
+│   └── store/
+│       ├── useRecordsStore.ts               # Documents state
+│       └── useMedAgentStore.ts              # Medications state
+│
+├── backend/                          # Express.js Backend
+│   └── src/
+│       ├── routes/
+│       │   ├── ingest.ts                    # Standard ingestion
+│       │   ├── ingestAdvanced.ts            # Agentic ingestion
+│       │   ├── medication.ts                # Medication CRUD
+│       │   └── chat.ts                      # AI chat/RAG
+│       └── services/
+│           ├── llamaParse.ts                # LlamaParse OCR
+│           ├── ocr.ts                       # Tesseract fallback
+│           ├── validationAI.ts              # Medical validation
+│           ├── chunker.ts                   # Text chunking
+│           ├── embeddings.ts                # Vector embeddings
+│           ├── vectorStore.ts               # Supabase operations
+│           ├── chatgpt.ts                   # OpenAI integration
+│           ├── gemini.ts                    # Gemini fallback
+│           └── medicationAI.ts              # Medication extraction
+│
+└── types/
+    ├── record.ts                            # HealthRecord type
+    └── medication.ts                        # Medication type
 ```
 
 ---
 
 ## Authentication Flow
 
-All API requests include Firebase Auth token:
-
-```typescript
-// backendApi.ts
-const getHeaders = async () => {
-    const token = await auth.currentUser?.getIdToken();
-    return {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-    };
-};
 ```
-
-Backend validates token and extracts user ID:
-
-```typescript
-// backend/src/middleware/firebase_auth.ts
-const decodedToken = await admin.auth().verifyIdToken(token);
-req.user = { id: decodedToken.uid };
+┌────────────────────────────────────────────────────────────────────────────────┐
+│                         🔐 AUTHENTICATION FLOW                                  │
+├────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  ┌─────────────────────┐                                                        │
+│  │ Firebase Auth       │  Sign in with Email/Password or OAuth                  │
+│  │ (Frontend)          │  Store: auth.currentUser                               │
+│  └─────────┬───────────┘                                                        │
+│            │                                                                    │
+│            ▼                                                                    │
+│  ┌─────────────────────┐                                                        │
+│  │ Get ID Token        │  await auth.currentUser.getIdToken()                   │
+│  └─────────┬───────────┘                                                        │
+│            │                                                                    │
+│            ▼                                                                    │
+│  ┌─────────────────────┐                                                        │
+│  │ API Request         │  Authorization: Bearer {token}                         │
+│  └─────────┬───────────┘                                                        │
+│            │                                                                    │
+│            ▼                                                                    │
+│  ┌─────────────────────┐                                                        │
+│  │ Backend Middleware  │  verifyFirebaseToken()                                 │
+│  │ (firebase_auth.ts)  │  admin.auth().verifyIdToken(token)                     │
+│  └─────────┬───────────┘                                                        │
+│            │                                                                    │
+│            ▼                                                                    │
+│  ┌─────────────────────┐                                                        │
+│  │ req.user.id         │  Firebase UID used for all DB queries                  │
+│  │ available           │  Ensures data isolation per user                       │
+│  └─────────────────────┘                                                        │
+│                                                                                 │
+└────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -451,9 +600,94 @@ req.user = { id: decodedToken.uid };
 
 | Layer | Technology | Purpose |
 |-------|------------|---------|
-| Database | Supabase PostgreSQL | Store document metadata & embeddings |
-| File Storage | Supabase Storage | Store actual files (images, PDFs) |
-| Backend | Express.js + TypeScript | API, OCR, AI processing |
-| State | Zustand | Cache records in memory |
-| UI | React Native + Tamagui | Display screens |
-| Auth | Firebase Auth | User authentication |
+| **Database** | Supabase PostgreSQL + pgvector | Store documents, chunks, embeddings |
+| **File Storage** | Supabase Storage | Store PDFs, images |
+| **Backend** | Express.js + TypeScript | API, OCR, AI orchestration |
+| **OCR** | LlamaParse (primary), Tesseract (fallback) | Text extraction |
+| **AI Models** | GPT-4, GPT-3.5, Gemini | Validation, summarization, chat |
+| **Embeddings** | OpenAI ada-002 | Vector search (RAG) |
+| **Drug Data** | RxNorm API | Medication lookup |
+| **Nutrition** | USDA FoodData API | Nutritional information |
+| **State** | Zustand | Frontend state management |
+| **UI** | React Native + Tamagui | Mobile app interface |
+| **Auth** | Firebase Auth | User authentication |
+
+---
+
+## Implemented API Endpoints
+
+### Nutrition API (`/api/nutrition`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/search?query=<food>&limit=5` | Search foods by name (USDA API) |
+| GET | `/food/:fdcId` | Get detailed nutrition facts for a food |
+| POST | `/log` | Log a food entry with nutrition data |
+| GET | `/logs?date=YYYY-MM-DD` | Get food logs for a date |
+| GET | `/summary?date=YYYY-MM-DD` | Get daily nutrition summary with FDA daily values |
+| DELETE | `/log/:id` | Delete a food log entry |
+
+### Insights API (`/api/insights`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/analyze` | Generate structured AI insights from document text |
+| GET | `/document/:documentId` | Get stored insights for a document |
+| GET | `/conditions` | Get all user health conditions |
+| POST | `/ask` | Ask a question about a specific document |
+| GET | `/history` | Get user's insight history |
+| GET | `/summary` | Get health summary with conditions by severity |
+
+### RxNorm Medication API (`/api/medication`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/rxnorm/search?query=<drug>` | Search drugs using RxNorm |
+| GET | `/rxnorm/:rxcui` | Get detailed drug info by RxCUI |
+| POST | `/interactions` | Check drug-drug interactions |
+| POST | `/:id/enrich` | Enrich existing medication with RxNorm data |
+
+### Backend Services
+
+| Service | File | External API |
+|---------|------|--------------|
+| RxNorm API | `backend/src/services/rxnormApi.ts` | `https://rxnav.nlm.nih.gov/REST/` |
+| USDA Food API | `backend/src/services/usdaApi.ts` | `https://api.nal.usda.gov/fdc/v1/` |
+| AI Insights | `backend/src/services/insightsAI.ts` | OpenAI GPT-4 |
+
+### Frontend API Functions
+
+All functions available in `src/services/api/backendApi.ts`:
+
+```typescript
+// Nutrition
+searchFoods(query: string, limit?: number)
+getFoodNutrition(fdcId: number)
+logFood(entry: FoodLogEntry)
+getFoodLogs(date?: string, limit?: number)
+getNutritionSummary(date?: string)
+deleteFoodLog(logId: string)
+
+// Insights
+analyzeDocument(extractedText: string, documentType?: string, documentId?: string)
+getDocumentInsights(documentId: string)
+getUserConditions()
+askDocumentQuestion(documentId: string, question: string)
+getInsightsHistory(limit?: number, offset?: number)
+getHealthSummary()
+
+// RxNorm
+searchDrugs(query: string)
+getDrugDetails(rxcui: string)
+checkDrugInteractions(rxcuiList?: string[])
+enrichMedication(medicationId: string)
+```
+
+### Database Tables (SQL Migration: `09_extended_features.sql`)
+
+| Table | Purpose |
+|-------|---------|
+| `conditions` | User health conditions extracted from documents |
+| `food_nutrition` | Food log entries with nutritional data |
+| `insights` | AI-generated structured insights |
+| `daily_nutrition_summary` | Aggregated daily nutrition totals (auto-updated via trigger) |

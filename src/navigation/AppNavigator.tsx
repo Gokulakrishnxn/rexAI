@@ -10,6 +10,7 @@ import { EmergencyModeScreen } from '../screens/Home/EmergencyModeScreen';
 
 import { LoginScreen } from '../screens/Auth/LoginScreen';
 import { SignupScreen } from '../screens/Auth/SignupScreen';
+import { CompleteProfileScreen } from '../screens/Auth/CompleteProfileScreen';
 import { ActivityIndicator, View } from 'react-native';
 
 export type RootStackParamList = {
@@ -18,8 +19,10 @@ export type RootStackParamList = {
   Main: undefined;
   EmergencyMode: undefined;
   VoiceChat: undefined;
+  CoachChat: undefined;
   AnalyzingPrescription: { imageBase64: string; imageUri: string };
   MedicationReview: { preloadedDrafts?: any[]; imageUri?: string; imageBase64?: string };
+  CompleteProfile: { email?: string; name?: string; photoURL?: string; isGoogleUser: boolean };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -31,6 +34,7 @@ function AuthStackScreen() {
     <AuthStack.Navigator screenOptions={{ headerShown: false }}>
       <AuthStack.Screen name="Login" component={LoginScreen} />
       <AuthStack.Screen name="Signup" component={SignupScreen} />
+      <AuthStack.Screen name="CompleteProfile" component={CompleteProfileScreen} />
     </AuthStack.Navigator>
   );
 }
