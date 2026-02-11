@@ -26,7 +26,7 @@ function getSupabase(): SupabaseClient {
 /** Lazy-initialized so server can start on Vercel even if env is not yet set; first API use will throw with a clear message if vars are missing. */
 export const supabase = new Proxy({} as SupabaseClient, {
     get(_, prop) {
-        return (getSupabase() as Record<string | symbol, unknown>)[prop];
+        return (getSupabase() as unknown as Record<string | symbol, unknown>)[prop];
     },
 });
 
