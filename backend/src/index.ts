@@ -39,7 +39,7 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
     res.status(500).json({ error: 'Internal server error' });
 });
 
-// Start server
+// Start server (local only; Vercel uses the exported app)
 async function start() {
     console.log('Initializing embedding model...');
 
@@ -71,4 +71,9 @@ async function start() {
     });
 }
 
-start();
+// On Vercel, only export the app (no listen). Locally, run start().
+if (process.env.VERCEL !== '1') {
+    start();
+}
+
+export default app;
