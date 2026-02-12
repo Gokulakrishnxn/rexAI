@@ -26,6 +26,17 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// Root route – entry point info
+app.get('/', (req, res) => {
+    res.json({
+        name: 'Rex Healthify Backend API',
+        status: 'ok',
+        health: '/health',
+        docs: null,
+        timestamp: new Date().toISOString()
+    });
+});
+
 // Health check
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });

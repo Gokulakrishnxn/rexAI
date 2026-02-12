@@ -13,6 +13,16 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// Root route – simple JSON entry point
+app.get('/', (_req: Request, res: Response) => {
+    res.json({
+        name: 'Rex Healthify Backend API',
+        status: 'ok',
+        health: '/health',
+        timestamp: new Date().toISOString()
+    });
+});
+
 app.get('/health', (_req: Request, res: Response) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
