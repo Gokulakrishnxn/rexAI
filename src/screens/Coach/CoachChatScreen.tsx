@@ -416,6 +416,8 @@ const ConfirmationBubble = ({ originalQuestion, sessionId, chatId, addMessage, s
     // Removed addMessage to avoid double response
   };
 
+
+
   if (answered && choice === 'yes') {
     return (
       <Card backgroundColor="#EFF6FF" padding="$3" borderRadius="$4" borderColor="#3B82F6" borderWidth={1} width={SCREEN_WIDTH * 0.85} alignSelf="center" marginVertical="$2">
