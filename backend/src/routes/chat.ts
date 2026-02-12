@@ -101,36 +101,66 @@ router.post('/', verifyFirebaseToken as any, async (req: FirebaseRequest, res: R
 
         const queryEmbedding = await embedText(question);
         console.log(`[RAG] Embedding generated. Searching for chunks... Filter: ${documentId || 'None'}`);
-        const similarChunks = skipRag ? [] : await searchSimilarChunks(userId, queryEmbedding, 6, 0.25, documentId || null);
-        console.log(`[RAG] Found ${similarChunks.length} relevant chunks similar to query.`);
+
+        // 1. GLOBAL SEARCH: Always search for similar chunks across ALL documents (or filtered if RPC supported it, but we do manual merge)
+        // We look for broader context: "Does this conflict with my other meds?"
+        let similarChunks = skipRag ? [] : await searchSimilarChunks(userId, queryEmbedding, 6, 0.25, null);
+
+        // 2. TARGETED SEARCH: If a specific document is requested, FORCE fetch its chunks to ensure context
+        if (documentId && !skipRag) {
+            console.log(`[RAG] Specific document requested: ${documentId}. Fetching targeted chunks...`);
+            const { getChunksByDocumentId } = await import('../services/vectorStore.js');
+            const targetedChunks = await getChunksByDocumentId(documentId, 15); // enhanced limit for specific doc
+
+            // Combine with global chunks, simple de-duplication by ID
+            const seenIds = new Set(similarChunks.map(c => c.id));
+            for (const chunk of targetedChunks) {
+                if (!seenIds.has(chunk.id)) {
+                    similarChunks.push(chunk);
+                    seenIds.add(chunk.id);
+                }
+            }
+            console.log(`[RAG] Merged context: ${similarChunks.length} chunks.`);
+        }
+
+        console.log(`[RAG] Found ${similarChunks.length} relevant chunks (after merge).`);
 
         // Secondary check: Best match must be > 0.35 to be considered a true "match"
+        // IF we have a documentID, we assume match is relevant because user explicitly asked for it (similarity=1.0)
         const bestMatchScore = similarChunks.length > 0 ? similarChunks[0].similarity : 0;
         console.log(`[RAG] Best match score: ${bestMatchScore}`);
 
-        const noRagMatch = !skipRag && (similarChunks.length === 0 || bestMatchScore < 0.35);
+        // If specific document is targeted, we trust the user's intent to query it even if similarity is low
+        const threshold = documentId ? 0.0 : 0.35; // 0.0 because targeted chunks have sim=1.0
+        const noRagMatch = !skipRag && (similarChunks.length === 0 || bestMatchScore < threshold);
 
         let ragContext: string = "";
 
-        // If no RAG match and not skipping, assume we need confirmation UNLESS it's a general medical question
+        // If no RAG match and not skipping, assume we need confirmation UNLESS it's a general medical question OR greeting
         if (noRagMatch) {
-            console.log('[Chat] No direct RAG match. Checking if query is medical-related for auto-answer...');
+            console.log('[Chat] No direct RAG match. Checking if query is medical-related or greeting...');
 
             try {
                 // Swift classification
                 const classification = await generateChatResponse(
-                    `Is the following question related to medical, health, fitness, biology, or mental well-being? Answer only YES or NO.\nQuestion: "${question}"`,
-                    "You are a strict classifier. Output only YES or NO.",
+                    `Classify the following question into one of these categories: MEDICAL, GREETING, OTHER.\n
+                    - MEDICAL: Related to health, biology, fitness, mental well-being, drugs, conditions.\n
+                    - GREETING: Simple pleasantries, hello, hi, thank you, who are you.\n
+                    - OTHER: General knowledge, politics, coding, random facts unrelated to health or the user.\n
+                    Question: "${question}"\nOutput only the category name.`,
+                    "You are a strict classifier. Output only MEDICAL, GREETING, or OTHER.",
                     []
                 );
 
-                const isMedical = classification.trim().toUpperCase().includes('YES');
-                console.log(`[Chat] Medical Classification: ${isMedical} (${classification})`);
+                const category = classification.trim().toUpperCase();
+                console.log(`[Chat] Query Category: ${category}`);
 
-                if (isMedical) {
+                if (category.includes('MEDICAL')) {
                     ragContext = `[User's medical records contained no results. Answer this general medical question accurately based on your general knowledge.\nIMPORTANT: You MUST append the following disclaimer at the very end of your response:\n"\n\n**Disclaimer:** I am an AI assistant, not a doctor. Please consult a healthcare professional for personalized medical advice."\n]`;
+                } else if (category.includes('GREETING')) {
+                    ragContext = `[User is engaging in conversation/pleasantries. Respond politely, briefly, and helpfully as a health coach assistant. Do NOT add disclaimers for simple greetings.]`;
                 } else {
-                    console.log('[Chat] Not medical and no RAG match. Returning confirmation prompt.');
+                    console.log('[Chat] Not medical/greeting and no RAG match. Returning confirmation prompt.');
                     return res.json({
                         success: true,
                         answer: '',

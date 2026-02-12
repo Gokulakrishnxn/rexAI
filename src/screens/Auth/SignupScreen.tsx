@@ -20,6 +20,8 @@ import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import Constants from 'expo-constants';
 
+import { useAuthStore } from '@/store/useAuthStore'; // Import store
+
 WebBrowser.maybeCompleteAuthSession();
 
 type Props = {
@@ -42,6 +44,8 @@ export function SignupScreen({ navigation }: Props) {
   const [gender, setGender] = useState('');
   const [bloodGroup, setBloodGroup] = useState('');
   const [emergencyContact, setEmergencyContact] = useState('');
+  const [abhaNumber, setAbhaNumber] = useState('');
+  const [aadharNumber, setAadharNumber] = useState('');
 
   const extra = Constants.expoConfig?.extra;
 
@@ -133,6 +137,9 @@ export function SignupScreen({ navigation }: Props) {
         gender,
         blood_group: bloodGroup,
         emergency_contact: emergencyContact,
+
+        abha_number: abhaNumber,
+        aadhar_number: aadharNumber,
         role: 'patient'
       }, token);
 
@@ -142,8 +149,25 @@ export function SignupScreen({ navigation }: Props) {
         throw new Error(onboardError || 'Failed to sync profile');
       }
 
-      // Success! The auth listener in AppNavigator will handle the redirect to Main
-      console.log('Signup and Onboarding Successful');
+      // Success! Auto-login via store
+      console.log('Signup and Onboarding Successful. Auto-logging in...');
+
+      // Manually set profile in store to bypass auth listener delay/fetch
+      useAuthStore.getState().setProfile({
+        id: fbUser.uid, // This ID might need to match backend ID, but setProfile uses it for session check
+        // Ideally we should use the returned profile from backend
+        ...userCredential.user, // Partial match
+        ...{
+          id: (onboardSuccess as any)?.profile?.id, // Get ID from backend response if available
+          email: email,
+          name: name,
+          role: 'patient',
+          firebase_uid: fbUser.uid,
+          onboarding_completed: false // Force false to show walkthrough
+        } as any
+      });
+
+      // No need to navigate manually, AppNavigator will pick up isAuthenticated change
     } catch (error: any) {
       // Ensure we don't leave a ghost session
       if (firebaseAuth.currentUser) {
@@ -318,6 +342,55 @@ export function SignupScreen({ navigation }: Props) {
         </XStack>
       </YStack>
 
+
+
+      {/* ABHA Number (Optional) */}
+      <YStack gap="$2">
+        <XStack justifyContent="space-between" alignItems="center">
+          <Text style={styles.inputLabel}>ABHA Address (Optional)</Text>
+          <TouchableOpacity onPress={() => WebBrowser.openBrowserAsync('https://abha.abdm.gov.in/abha/v3')}>
+            <XStack alignItems="center" gap="$1">
+              <Ionicons name="information-circle-outline" size={14} color="#3B82F6" />
+              <Text fontSize={12} color="#3B82F6">What is this?</Text>
+            </XStack>
+          </TouchableOpacity>
+        </XStack>
+        <View style={styles.inputContainer}>
+          <Input
+            flex={1}
+            backgroundColor="transparent"
+            borderWidth={0}
+            color="#1A1A1A"
+            placeholder="e.g. name@abdm"
+            value={abhaNumber}
+            onChangeText={setAbhaNumber}
+            style={styles.input}
+          />
+        </View>
+        <Text fontSize={11} color="#6B7280" marginTop="$1">
+          Your unique digital health identity for sharing records.
+        </Text>
+      </YStack>
+
+      {/* Aadhar Number (Optional) */}
+      <YStack gap="$2">
+        <Text style={styles.inputLabel}>Aadhar Number (Optional)</Text>
+        <View style={styles.inputContainer}>
+          <Input
+            flex={1}
+            backgroundColor="transparent"
+            borderWidth={0}
+            color="#1A1A1A"
+            placeholder="12-digit number"
+            keyboardType="numeric"
+            value={aadharNumber}
+            onChangeText={setAadharNumber}
+            style={styles.input}
+            maxLength={12}
+          />
+        </View>
+      </YStack>
+
       {/* Emergency Contact */}
       <YStack gap="$2">
         <Text style={styles.inputLabel}>Emergency Contact *</Text>
@@ -349,7 +422,7 @@ export function SignupScreen({ navigation }: Props) {
           <Text style={styles.primaryButtonText}>Complete Signup</Text>
         )}
       </TouchableOpacity>
-    </YStack>
+    </YStack >
   );
 
   return (

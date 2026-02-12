@@ -6,6 +6,7 @@ import { WelcomeScreen } from '../screens/Onboarding/WelcomeScreen';
 import { PermissionsScreen } from '../screens/Onboarding/PermissionsScreen';
 import { ProfileSetupScreen } from '../screens/Onboarding/ProfileSetupScreen';
 import { QRSetupScreen } from '../screens/Onboarding/QRSetupScreen';
+import { PostSignupWalkthroughScreen } from '../screens/Onboarding/PostSignupWalkthroughScreen';
 import { EmergencyModeScreen } from '../screens/Home/EmergencyModeScreen';
 
 import { LoginScreen } from '../screens/Auth/LoginScreen';
@@ -23,6 +24,7 @@ export type RootStackParamList = {
   AnalyzingPrescription: { imageBase64: string; imageUri: string };
   MedicationReview: { preloadedDrafts?: any[]; imageUri?: string; imageBase64?: string };
   CompleteProfile: { email?: string; name?: string; photoURL?: string; isGoogleUser: boolean };
+  Walkthrough: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -79,6 +81,8 @@ export function AppNavigator() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       {!isAuthenticated ? (
         <Stack.Screen name="Auth" component={AuthStackScreen} />
+      ) : !isOnboarded ? (
+        <Stack.Screen name="Walkthrough" component={PostSignupWalkthroughScreen} />
       ) : (
         <>
           <Stack.Screen name="Main" component={TabNavigator} />

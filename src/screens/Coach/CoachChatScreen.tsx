@@ -413,38 +413,35 @@ const ConfirmationBubble = ({ originalQuestion, sessionId, chatId, addMessage, s
   const handleNo = () => {
     setChoice('no');
     setAnswered(true);
-    addMessage(chatId, {
-      id: Date.now().toString(),
-      text: "Understood! Feel free to ask me anything about your uploaded medical records. 📋",
-      userId: 'coach',
-      createdAt: new Date(),
-    });
+    // Removed addMessage to avoid double response
   };
 
-  // if (answered && choice === 'yes') {
-  //   return (
-  //     <Card backgroundColor="#EFF6FF" padding="$3" borderRadius="$4" borderColor="#3B82F6" borderWidth={1} width={SCREEN_WIDTH * 0.85} alignSelf="center" marginVertical="$2">
-  //       <XStack alignItems="center" gap="$2">
-  //         <Ionicons name="checkmark-circle" size={20} color="#3B82F6" />
-  //         <Text fontSize={13} color="#1E40AF" fontWeight="600">
-  //           {loading ? 'Generating response...' : 'Answered from general knowledge'}
-  //         </Text>
-  //         {loading && <ActivityIndicator size="small" color="#3B82F6" />}
-  //       </XStack>
-  //     </Card>
-  //   );
-  // }
+  if (answered && choice === 'yes') {
+    return (
+      <Card backgroundColor="#EFF6FF" padding="$3" borderRadius="$4" borderColor="#3B82F6" borderWidth={1} width={SCREEN_WIDTH * 0.85} alignSelf="center" marginVertical="$2">
+        <XStack alignItems="center" gap="$2">
+          <Ionicons name="checkmark-circle" size={20} color="#3B82F6" />
+          <Text fontSize={13} color="#1E40AF" fontWeight="600">
+            {loading ? 'Generating response...' : 'Answered from general knowledge'}
+          </Text>
+          {loading && <ActivityIndicator size="small" color="#3B82F6" />}
+        </XStack>
+      </Card>
+    );
+  }
 
-  // if (answered && choice === 'no') {
-  //   return (
-  //     <Card backgroundColor="#F3F4F6" padding="$3" borderRadius="$4" borderColor="#D1D5DB" borderWidth={1} width={SCREEN_WIDTH * 0.85} alignSelf="center" marginVertical="$2">
-  //       <XStack alignItems="center" gap="$2">
-  //         <Ionicons name="close-circle" size={20} color="#6B7280" />
-  //         <Text fontSize={13} color="#6B7280" fontWeight="600">Request declined</Text>
-  //       </XStack>
-  //     </Card>
-  //   );
-  // }
+  if (answered && choice === 'no') {
+    return (
+      <Card backgroundColor="#F3F4F6" padding="$3" borderRadius="$4" borderColor="#D1D5DB" borderWidth={1} width={SCREEN_WIDTH * 0.85} alignSelf="center" marginVertical="$2">
+        <XStack alignItems="center" gap="$2">
+          <Ionicons name="chatbubble-ellipses-outline" size={20} color="#6B7280" />
+          <Text fontSize={13} color="#4B5563" numberOfLines={2} style={{ flex: 1 }}>
+            Understood! Feel free to ask me anything about your uploaded medical records. 📋
+          </Text>
+        </XStack>
+      </Card>
+    );
+  }
 
   return (
     <Card backgroundColor="#FFFBEB" padding="$4" borderRadius="$4" borderColor="#F59E0B" borderWidth={1} width={SCREEN_WIDTH * 0.85} alignSelf="center" marginVertical="$2" elevation={2}>

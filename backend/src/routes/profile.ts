@@ -11,7 +11,7 @@ const router = Router();
 router.post('/onboard', verifyFirebaseOnly as any, async (req: FirebaseRequest, res: Response) => {
     try {
         const firebaseUser = req.firebaseUser!;
-        const { name, age, gender, blood_group, emergency_contact, role } = req.body;
+        const { name, age, gender, blood_group, emergency_contact, role, abha_number, aadhar_number } = req.body;
 
         console.log(`[Backend] Onboarding user: ${firebaseUser.email} (${firebaseUser.uid})`);
 
@@ -25,7 +25,10 @@ router.post('/onboard', verifyFirebaseOnly as any, async (req: FirebaseRequest, 
                 gender: gender || null,
                 blood_group: blood_group || null,
                 emergency_contact: emergency_contact || null,
-                role: role || 'patient'
+                abha_number: abha_number || null,
+                aadhar_number: aadhar_number || null,
+                role: role || 'patient',
+                onboarding_completed: false // Force false to show walkthrough
             }, {
                 onConflict: 'firebase_uid'
             })
@@ -97,6 +100,48 @@ router.get('/activities', verifyFirebaseOnly as any, async (req: FirebaseRequest
         res.json({ success: true, activities: data });
     } catch (error: any) {
         console.error('[Backend] Fetch Activities Failed:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+
+/**
+ * PATCH /api/profile
+ * Updates the user profile fields
+ */
+router.patch('/', verifyFirebaseOnly as any, async (req: FirebaseRequest, res: Response) => {
+    try {
+        const firebaseUser = req.firebaseUser!;
+        const updates = req.body; // Expecting { onboarding_completed: true, ... }
+
+        // Filter allowed fields to prevent arbitrary updates if needed
+        // For now, we trust the fields, but strictly mapping them is better
+        const allowedUpdates = {
+            ...(updates.onboarding_completed !== undefined && { onboarding_completed: updates.onboarding_completed }),
+            ...(updates.age !== undefined && { age: parseInt(updates.age) }),
+            ...(updates.gender !== undefined && { gender: updates.gender }),
+            ...(updates.blood_group !== undefined && { blood_group: updates.blood_group }),
+            ...(updates.emergency_contact !== undefined && { emergency_contact: updates.emergency_contact }),
+            // Add other fields as necessary
+        };
+
+        if (Object.keys(allowedUpdates).length === 0) {
+            return res.json({ success: true, message: 'No valid updates provided' });
+        }
+
+        const { data, error } = await supabase
+            .from('users')
+            .update(allowedUpdates)
+            .eq('firebase_uid', firebaseUser.uid)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        console.log(`[Backend] Profile updated for ${firebaseUser.email}:`, allowedUpdates);
+        res.json({ success: true, profile: data });
+    } catch (error: any) {
+        console.error('[Backend] Update Profile Failed:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });

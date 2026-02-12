@@ -66,35 +66,36 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
 async function start() {
     console.log('Initializing embedding model...');
 
-    try {
-        await initEmbeddings();
-        console.log('Embedding model ready');
-    } catch (error) {
-        console.error('Failed to initialize embeddings:', error);
-        console.log('Server will continue, embeddings will load on first use');
-    }
+    // OPTIMIZATION: Do NOT await embeddings on startup for Vercel
+    // They will be loaded lazily when the first request comes in (in embedText)
+    initEmbeddings().catch(e => console.error('Background embedding init failed:', e));
+    console.log('Embedding model initializing in background...');
 
     // Start Medication Notification Scheduler
+    // Note: In Vercel serverless, this won't persist. Use Vercel Cron for production.
     await startMedicationScheduler();
 
-    app.listen(Number(PORT), '0.0.0.0', () => {
-        console.log(`🚀 Rex Healthify Backend running on port ${PORT}`);
-        console.log(`   Local:   http://localhost:${PORT}`);
+    // Only listen if NOT running on Vercel (Vercel handles the listener)
+    if (process.env.VERCEL !== '1') {
+        app.listen(Number(PORT), '0.0.0.0', () => {
+            console.log(`🚀 Rex Healthify Backend running on port ${PORT}`);
+            console.log(`   Local:   http://localhost:${PORT}`);
 
-        // Log LAN IP for physical device connection
-        const { networkInterfaces } = require('os');
-        const nets = networkInterfaces();
-        for (const name of Object.keys(nets)) {
-            for (const net of nets[name]) {
-                if (net.family === 'IPv4' && !net.internal) {
-                    console.log(`   Network: http://${net.address}:${PORT} (Use this for physical device)`);
+            // Log LAN IP for physical device connection
+            const { networkInterfaces } = require('os');
+            const nets = networkInterfaces();
+            for (const name of Object.keys(nets)) {
+                for (const net of nets[name]) {
+                    if (net.family === 'IPv4' && !net.internal) {
+                        console.log(`   Network: http://${net.address}:${PORT} (Use this for physical device)`);
+                    }
                 }
             }
-        }
 
-        console.log(`   Health:  http://localhost:${PORT}/health`);
-        console.log(`   Profile: POST http://localhost:${PORT}/api/profile/onboard`);
-    });
+            console.log(`   Health:  http://localhost:${PORT}/health`);
+            console.log(`   Profile: POST http://localhost:${PORT}/api/profile/onboard`);
+        });
+    }
 }
 
 // On Vercel, only export the app (no listen). Locally, run start().

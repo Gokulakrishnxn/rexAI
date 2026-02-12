@@ -234,3 +234,28 @@ export async function getChunkCount(documentId: string): Promise<number> {
 
     return count || 0;
 }
+/**
+ * Get chunks for a specific document (Targeted Retrieval)
+ * Bypasses vector search to ensure context is loaded for @filename queries
+ */
+export async function getChunksByDocumentId(
+    documentId: string,
+    limit: number = 20
+): Promise<SimilarChunk[]> {
+    const { data, error } = await supabase
+        .from('document_chunks')
+        .select('id, document_id, chunk_index, content')
+        .eq('document_id', documentId)
+        .order('chunk_index', { ascending: true }) // meaningful order
+        .limit(limit);
+
+    if (error) {
+        throw new Error(`Failed to get chunks for document ${documentId}: ${error.message}`);
+    }
+
+    // Map to SimilarChunk format with a "perfect" similarity score since they are explicitly requested
+    return (data || []).map(chunk => ({
+        ...chunk,
+        similarity: 1.0,
+    }));
+}

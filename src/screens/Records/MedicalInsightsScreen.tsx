@@ -79,10 +79,10 @@ export function MedicalInsightsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [selectedMetricTab, setSelectedMetricTab] = useState('Health Score');
   const [selectedPoint, setSelectedPoint] = useState<number | null>(null);
-  
+
   // Accordion state for Safety Q&A
   const [expandedQA, setExpandedQA] = useState<number | null>(null);
-  
+
   // Track which medications have been added
   const [addedMedications, setAddedMedications] = useState<Set<string>>(new Set());
   const [savingMedication, setSavingMedication] = useState<string | null>(null);
@@ -146,7 +146,7 @@ export function MedicalInsightsScreen() {
 
       // Step 3: Generating insights
       setAnalysisStep('generating');
-      
+
       // Call the full agentic analysis pipeline
       const result = await analyzeDocumentFull(documentId, forceRefresh);
 
@@ -200,7 +200,7 @@ export function MedicalInsightsScreen() {
   // Add medication to user's medication list
   const handleAddMedication = async (medication: string) => {
     if (addedMedications.has(medication) || savingMedication) return;
-    
+
     setSavingMedication(medication);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
@@ -209,7 +209,7 @@ export function MedicalInsightsScreen() {
       const drugName = medication.split('(')[0].trim();
       const match = medication.match(/(\d+\s*mg|\d+\s*ml|\d+\s*mcg)/i);
       const dosage = match ? match[1] : '';
-      
+
       const medicationData = [{
         drug_name: drugName,
         dosage: dosage || 'As prescribed',
@@ -223,7 +223,7 @@ export function MedicalInsightsScreen() {
       }];
 
       const result = await confirmMedicationPlan(medicationData);
-      
+
       if (result.success) {
         setAddedMedications(prev => new Set([...prev, medication]));
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -273,7 +273,7 @@ export function MedicalInsightsScreen() {
     if (!selectedTrend && trends.length > 0) {
       selectedTrend = trends[0];
     }
-    
+
     // Generate fallback data if no trends exist
     const fallbackData = [
       { date: '2025-11-10', value: 105 },
@@ -281,7 +281,7 @@ export function MedicalInsightsScreen() {
       { date: '2026-01-10', value: 95 },
       { date: '2026-02-10', value: 92 },
     ];
-    
+
     const data = selectedTrend?.data || fallbackData;
     const chartWidth = SCREEN_WIDTH - 80;
     const chartHeight = 140;
@@ -323,33 +323,33 @@ export function MedicalInsightsScreen() {
           {/* Grid lines */}
           <Line x1={padding} y1={padding - 10} x2={padding} y2={chartHeight - padding} stroke="#E5E5EA" strokeWidth={1} />
           <Line x1={padding} y1={chartHeight - padding} x2={chartWidth - padding} y2={chartHeight - padding} stroke="#E5E5EA" strokeWidth={1} />
-          
+
           {/* Horizontal guide lines */}
           <Line x1={padding} y1={(chartHeight - padding * 2) * 0.25 + padding - 10} x2={chartWidth - padding} y2={(chartHeight - padding * 2) * 0.25 + padding - 10} stroke="#F0F0F0" strokeWidth={1} />
           <Line x1={padding} y1={(chartHeight - padding * 2) * 0.5 + padding - 10} x2={chartWidth - padding} y2={(chartHeight - padding * 2) * 0.5 + padding - 10} stroke="#F0F0F0" strokeWidth={1} />
           <Line x1={padding} y1={(chartHeight - padding * 2) * 0.75 + padding - 10} x2={chartWidth - padding} y2={(chartHeight - padding * 2) * 0.75 + padding - 10} stroke="#F0F0F0" strokeWidth={1} />
-          
+
           {/* Target line */}
-          <Line 
-            x1={padding} 
-            y1={chartHeight - padding - ((100 - minVal) / (maxVal - minVal)) * (chartHeight - padding * 2)} 
-            x2={chartWidth - padding} 
-            y2={chartHeight - padding - ((100 - minVal) / (maxVal - minVal)) * (chartHeight - padding * 2)} 
-            stroke="#34C759" 
-            strokeDasharray="6,4" 
-            strokeWidth={1.5} 
+          <Line
+            x1={padding}
+            y1={chartHeight - padding - ((100 - minVal) / (maxVal - minVal)) * (chartHeight - padding * 2)}
+            x2={chartWidth - padding}
+            y2={chartHeight - padding - ((100 - minVal) / (maxVal - minVal)) * (chartHeight - padding * 2)}
+            stroke="#34C759"
+            strokeDasharray="6,4"
+            strokeWidth={1.5}
           />
-          
+
           {/* Trend line */}
           <Path d={pathD} stroke="#007AFF" strokeWidth={2.5} fill="none" />
-          
+
           {/* Data points - base circles */}
           {points.map((p, i) => (
-            <Circle 
-              key={`base-${i}`} 
-              cx={p.x} 
-              cy={p.y} 
-              r={selectedPoint === i ? 8 : 5} 
+            <Circle
+              key={`base-${i}`}
+              cx={p.x}
+              cy={p.y}
+              r={selectedPoint === i ? 8 : 5}
               fill={selectedPoint === i ? '#007AFF' : '#FFF'}
               stroke="#007AFF"
               strokeWidth={2}
@@ -365,7 +365,7 @@ export function MedicalInsightsScreen() {
             style={[styles.touchTarget, { left: p.x - 20, top: p.y - 20 }]}
           />
         ))}
-        
+
         {/* Labels */}
         <XStack justifyContent="space-between" px="$2" mt="$2">
           <Text fontSize={11} color="#8E8E93">Oldest</Text>
@@ -373,7 +373,7 @@ export function MedicalInsightsScreen() {
           <Text fontSize={11} color="#8E8E93">-1 mo</Text>
           <Text fontSize={11} color="#007AFF" fontWeight="600">Latest</Text>
         </XStack>
-        
+
         {/* Y-axis labels */}
         <View style={styles.yAxisLabels}>
           <Text fontSize={10} color="#8E8E93">High</Text>
@@ -419,27 +419,27 @@ export function MedicalInsightsScreen() {
             {analysisStep === 'error' ? 'Analysis Failed' : 'Analyzing Document...'}
           </Text>
           <Text fontSize={14} color="#8E8E93" mt="$2" textAlign="center" px="$6">
-            {analysisStep === 'error' 
+            {analysisStep === 'error'
               ? error || 'Unable to analyze this document.'
               : getStepLabel(analysisStep)
             }
           </Text>
           {analysisStep !== 'error' ? (
             <View style={styles.loadingSteps}>
-              <LoadingStep 
-                label="Retrieving document" 
-                completed={['extracting', 'validating', 'analyzing', 'generating', 'complete'].includes(analysisStep)} 
-                active={analysisStep === 'fetching'} 
+              <LoadingStep
+                label="Retrieving document"
+                completed={['extracting', 'validating', 'analyzing', 'generating', 'complete'].includes(analysisStep)}
+                active={analysisStep === 'fetching'}
               />
-              <LoadingStep 
-                label="Analyzing with AI" 
-                completed={['generating', 'complete'].includes(analysisStep)} 
-                active={['validating', 'analyzing'].includes(analysisStep)} 
+              <LoadingStep
+                label="Analyzing with AI"
+                completed={['generating', 'complete'].includes(analysisStep)}
+                active={['validating', 'analyzing'].includes(analysisStep)}
               />
-              <LoadingStep 
-                label="Generating insights" 
-                completed={analysisStep === 'complete'} 
-                active={analysisStep === 'generating'} 
+              <LoadingStep
+                label="Generating insights"
+                completed={analysisStep === 'complete'}
+                active={analysisStep === 'generating'}
               />
             </View>
           ) : (
@@ -486,7 +486,7 @@ export function MedicalInsightsScreen() {
         <View style={styles.headerRight} />
       </View>
 
-      <Animated.ScrollView 
+      <Animated.ScrollView
         style={[styles.scrollView, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
@@ -512,7 +512,7 @@ export function MedicalInsightsScreen() {
           <Text fontSize={20} fontWeight="700" color="#000" lineHeight={26}>
             {insight.overview?.split('.')[0] || 'Analysis complete'}.
           </Text>
-          
+
           <Text fontSize={14} color="#666" mt="$2" lineHeight={20}>
             {insight.overview?.split('.').slice(1).join('.').trim() || 'Review the findings below.'}
           </Text>
@@ -576,19 +576,19 @@ export function MedicalInsightsScreen() {
         <View style={styles.section}>
           <Text fontSize={16} fontWeight="600" color="#000" mb="$1">Improvement Trends</Text>
           <Text fontSize={13} color="#8E8E93" mb="$3">Last 4 reports · Normalized by range</Text>
-          
+
           {/* Metric tabs - use dynamic labels from trends data */}
           {insight?.charts?.trends && insight.charts.trends.length > 0 && (
             <XStack gap="$2" mb="$3">
               {insight.charts.trends.map((trend, idx) => (
-                <TouchableOpacity 
+                <TouchableOpacity
                   key={idx}
                   style={[styles.metricTab, selectedMetricTab === trend.label && styles.metricTabActive]}
                   onPress={() => setSelectedMetricTab(trend.label)}
                 >
-                  <Text 
-                    fontSize={13} 
-                    fontWeight="500" 
+                  <Text
+                    fontSize={13}
+                    fontWeight="500"
                     color={selectedMetricTab === trend.label ? '#007AFF' : '#8E8E93'}
                   >
                     {trend.label}
@@ -612,8 +612,8 @@ export function MedicalInsightsScreen() {
               {insight.safetyInsights.map((qa, idx) => {
                 const isExpanded = expandedQA === idx;
                 return (
-                  <TouchableOpacity 
-                    key={idx} 
+                  <TouchableOpacity
+                    key={idx}
                     activeOpacity={0.8}
                     onPress={() => toggleAccordion(idx)}
                   >
@@ -656,8 +656,8 @@ export function MedicalInsightsScreen() {
               <Salad size={18} color="#000" />
               <Text fontSize={16} fontWeight="600" color="#000">Food Recommendations</Text>
             </XStack>
-            <ScrollView 
-              horizontal 
+            <ScrollView
+              horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.horizontalScrollContent}
               decelerationRate="fast"
@@ -818,6 +818,7 @@ export function MedicalInsightsScreen() {
             {insight?.doctorAssessment ? (
               <YStack gap="$3">
                 <Text fontSize={14} color="#1A3A5C" fontStyle="italic" lineHeight={22}>
+                  With respect to your Prescription, here is what I found:
                   "{insight.doctorAssessment.greeting}"
                 </Text>
                 <YStack gap="$2">
@@ -875,7 +876,7 @@ export function MedicalInsightsScreen() {
           <Text fontSize={14} color="rgba(255,255,255,0.9)" mt="$2" lineHeight={20} textAlign="center">
             Chat with our AI to understand your results better and get personalized advice.
           </Text>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.chatButton}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);

@@ -17,6 +17,9 @@ interface UserProfile {
   height?: number;
   weight?: number;
   avatar_url?: string;
+  abha_number?: string;
+  aadhar_number?: string;
+  onboarding_completed?: boolean;
 }
 
 interface AuthState {
@@ -28,6 +31,7 @@ interface AuthState {
   setOnboarded: (v: boolean) => Promise<void>;
   signOut: () => Promise<void>;
   initialize: () => void;
+  setProfile: (profile: UserProfile) => void;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -40,10 +44,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   setOnboarded: async (v) => {
     const { user } = get();
     if (user) {
-      await supabase
-        .from('users')
-        .update({ onboarding_completed: v })
-        .eq('id', user.id);
+      // Use backend API to bypass RLS
+      const { updateUserProfile } = await import('../services/api/backendApi');
+      await updateUserProfile({ onboarding_completed: v });
     }
     set({ isOnboarded: v });
   },
@@ -92,4 +95,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
     });
   },
+
+  setProfile: (profile) => {
+    set({
+      user: profile,
+      isAuthenticated: true,
+      isOnboarded: profile.onboarding_completed || false,
+      loading: false
+    });
+  }
 }));

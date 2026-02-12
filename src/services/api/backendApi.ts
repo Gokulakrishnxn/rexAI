@@ -8,16 +8,18 @@ import { useAuthStore } from '../../store/useAuthStore';
 import { Platform } from 'react-native';
 
 const getBackendUrl = (): string => {
-    // 1. Check environment variable
+    // 1. Check environment variable (Priority)
+    // If set, ALWAYS use this (Production/Vercel)
     if (process.env.EXPO_PUBLIC_BACKEND_URL) {
+        console.log('[BackendApi] Using Configured URL:', process.env.EXPO_PUBLIC_BACKEND_URL);
         return process.env.EXPO_PUBLIC_BACKEND_URL;
     }
 
-    // 2. Dynamic Host URI (Critical for physical devices)
+    // 2. Dynamic Host URI (Critical for physical devices in DEV mode only)
     if (Constants.expoConfig?.hostUri) {
         const host = Constants.expoConfig.hostUri.split(':')[0];
         const url = `http://${host}:3001`;
-        console.log('[BackendApi] Dynamic URL:', url);
+        console.log('[BackendApi] Dynamic URL (Dev):', url);
         return url;
     }
 
@@ -320,6 +322,8 @@ export const onboardUser = async (profileData: {
     gender?: string;
     blood_group?: string;
     emergency_contact?: string;
+    abha_number?: string;
+    aadhar_number?: string;
     role?: string;
 }, token?: string): Promise<{ success: boolean; profile?: any; error?: string }> => {
     try {
@@ -370,6 +374,32 @@ export const fetchUserProfile = async (token?: string): Promise<{ success: boole
         return data;
     } catch (error: any) {
         console.error('Fetch profile error:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+/**
+ * Update User Profile
+ */
+export const updateUserProfile = async (updates: any): Promise<{ success: boolean; profile?: any; error?: string }> => {
+    try {
+        const headers = await getHeaders();
+        const url = `${getBackendUrl()}/api/profile`;
+
+        const response = await fetch(url, {
+            method: 'PATCH',
+            headers: headers,
+            body: JSON.stringify(updates),
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `HTTP ${response.status}`);
+        }
+
+        return await response.json();
+    } catch (error: any) {
+        console.error('Update Profile Error:', error);
         return { success: false, error: error.message };
     }
 };
