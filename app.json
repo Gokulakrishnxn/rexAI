@@ -23,7 +23,13 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "package": "com.rexhealthify.app"
+      "package": "com.rexhealthify.app",
+      "versionCode": 1,
+      "permissions": [
+        "INTERNET",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -46,7 +52,7 @@
     "extra": {
       "supabaseUrl": "https://fdyvdfzoduflveibcwlp.supabase.co",
       "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZkeXZkZnpvZHVmbHZlaWJjd2xwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyMDUwNzIsImV4cCI6MjA4NTc4MTA3Mn0.NMXswkHHkJGEKyIKl06akPQU5a29ok6XWmrvQok1ArY",
-      "backendUrl": "http://192.168.1.5:3001",
+      "backendUrl": "https://rexai-backend.vercel.app",
       "firebaseApiKey": "AIzaSyDDoNbspnXR-cxFBWvW5e9k5VYwwJtFEb0",
       "firebaseAuthDomain": "rexai-9f26f.firebaseapp.com",
       "firebaseProjectId": "rexai-9f26f",
