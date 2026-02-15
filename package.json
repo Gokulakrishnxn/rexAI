@@ -88,7 +88,9 @@
   "expo": {
     "doctor": {
       "reactNativeDirectoryCheck": {
-        "exclude": ["@react-native-voice/voice"]
+        "exclude": [
+          "@react-native-voice/voice"
+        ]
       }
     }
   },
