@@ -3,7 +3,8 @@ import multer from 'multer';
 import { verifyFirebaseToken } from '../middleware/firebase_auth.js';
 import { handleVoiceRequest } from '../controllers/voiceController.js';
 
-const upload = multer({ dest: 'uploads/' });
+// Use /tmp for serverless environments like Vercel
+const upload = multer({ dest: '/tmp/uploads/' });
 const router = Router();
 
 // Endpoint: POST /api/voice
