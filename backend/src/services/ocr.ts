@@ -1,9 +1,11 @@
 /**
- * OCR Service using Tesseract.js
- * Extracts text from images and PDFs
- * Tesseract and pdf-parse are lazy-loaded so serverless (e.g. Vercel) can cold start without loading them.
+ * OCR Service — LlamaParse (primary) → Tesseract.js (fallback)
+ * Extracts text from images and PDFs.
+ * LlamaParse uses LlamaIndex Cloud for high-quality agentic extraction.
+ * Tesseract.js is kept as a local fallback if LlamaParse fails.
  */
 
+import { parseBufferWithLlamaCloud } from './llamaParse.js';
 import { extractTextFromPdfWithGemini, extractTextFromImageWithGemini } from './gemini.js';
 
 async function getPDFParse(): Promise<any> {
@@ -16,42 +18,51 @@ async function getTesseract(): Promise<typeof import('tesseract.js')> {
 }
 
 /**
- * Extract text from a dictionary-based PDF buffer
- * Fallback to Gemini OCR for scanned documents
+ * Extract text from a PDF buffer.
+ * Pipeline: LlamaParse → pdf-parse → Gemini OCR
  */
 export async function extractTextFromPdf(pdfBuffer: Buffer): Promise<string> {
-    console.log('Starting PDF text extraction...');
-    let text = '';
+    console.log('[OCR] Starting PDF text extraction...');
 
-    // 1. Try standard extraction first (fast)
+    // 1. Try LlamaParse first (best quality)
+    try {
+        console.log('[OCR] Attempting LlamaParse (LlamaIndex Cloud)...');
+        const llamaText = await parseBufferWithLlamaCloud(pdfBuffer, 'application/pdf', 'document.pdf');
+        if (llamaText && llamaText.trim().length > 20) {
+            console.log(`[OCR] ✅ LlamaParse succeeded: ${llamaText.length} chars`);
+            return normalizeText(llamaText);
+        }
+        console.warn('[OCR] LlamaParse returned insufficient text, falling back...');
+    } catch (llamaErr: any) {
+        console.warn(`[OCR] LlamaParse failed: ${llamaErr.message}. Falling back to Tesseract/pdf-parse...`);
+    }
+
+    // 2. Fallback: Standard pdf-parse
+    let text = '';
     try {
         const PDFParse = await getPDFParse();
         const parser = new PDFParse({ data: pdfBuffer });
         const data = await parser.getText();
         text = normalizeText(data.text);
-
-        console.log(`PDF Extraction Raw Text Length: ${data.text.length}`);
+        console.log(`[OCR] pdf-parse extracted ${text.length} chars`);
     } catch (e) {
-        console.warn('Standard PDF parsing failed, proceeding to Gemini Fallback.');
+        console.warn('[OCR] Standard PDF parsing also failed.');
     }
 
-    // 2. heuristic Quality Check: Is it likely garbage/scanned?
+    // 3. Quality check — if poor, try Gemini OCR
     const cleanChars = text.replace(/[^a-zA-Z0-9\s]/g, '').length;
     const totalChars = text.length;
-    const isQualityPoor = totalChars < 50 || (cleanChars / totalChars < 0.5) || text.includes('AHEEE') || text.includes('');
+    const isQualityPoor = totalChars < 50 || (cleanChars / totalChars < 0.5);
 
     if (isQualityPoor) {
-        console.log('[OCR] Standard PDF text quality is poor (likely scanned). Switching to Gemini OCR (Fallback)...');
+        console.log('[OCR] PDF text quality is poor (likely scanned). Trying Gemini OCR...');
         try {
-            // Note: Tesseract doesn't strictly support PDF buffers without conversion.
-            // Converting PDF -> Image requires extra heavy deps (canvas/sharp/poppler).
-            // So for PDFs, we default to Gemini Vision as the "OCR Engine" fallback.
             const ocrText = await extractTextFromPdfWithGemini(pdfBuffer);
             if (ocrText && ocrText.length > text.length) {
                 return normalizeText(ocrText);
             }
         } catch (geminiError: any) {
-            console.error('Gemini PDF OCR Fallback failed:', geminiError.message);
+            console.error('[OCR] Gemini PDF fallback also failed:', geminiError.message);
         }
     }
 
@@ -59,22 +70,45 @@ export async function extractTextFromPdf(pdfBuffer: Buffer): Promise<string> {
 }
 
 /**
- * Extract text from an image URL or buffer
+ * Extract text from an image URL or buffer.
+ * Pipeline: LlamaParse → Tesseract.js → Gemini Vision
  */
 export async function extractTextFromImage(
     imageSource: string | Buffer,
     mimeType: string = 'image/png'
 ): Promise<string> {
-    console.log('Starting OCR extraction (Tesseract)...');
+    // 1. Try LlamaParse first (best quality for medical docs, handwriting, etc.)
+    try {
+        let buffer: Buffer;
+        if (Buffer.isBuffer(imageSource)) {
+            buffer = imageSource;
+        } else if (typeof imageSource === 'string' && imageSource.startsWith('http')) {
+            buffer = await downloadFile(imageSource);
+        } else {
+            throw new Error('Cannot convert image source to buffer for LlamaParse');
+        }
+
+        console.log('[OCR] Attempting LlamaParse for image...');
+        const llamaText = await parseBufferWithLlamaCloud(buffer, mimeType, 'image.png');
+        if (llamaText && llamaText.trim().length > 10) {
+            console.log(`[OCR] ✅ LlamaParse image extraction succeeded: ${llamaText.length} chars`);
+            return normalizeText(llamaText);
+        }
+        console.warn('[OCR] LlamaParse returned insufficient text for image, falling back...');
+    } catch (llamaErr: any) {
+        console.warn(`[OCR] LlamaParse image failed: ${llamaErr.message}. Falling back to Tesseract...`);
+    }
+
+    // 2. Fallback: Tesseract.js
+    console.log('[OCR] Attempting Tesseract.js...');
     const Tesseract = await getTesseract();
 
     try {
         const result = await Tesseract.recognize(
             imageSource,
-            'eng', // English language
+            'eng',
             {
                 logger: (m) => {
-                    // Only log every 20-30% to avoid spamming terminal
                     if (m.status === 'recognizing text' && Math.round(m.progress * 100) % 20 === 0) {
                         console.log(`[Tesseract] Progress: ${Math.round(m.progress * 100)}%`);
                     }
@@ -85,33 +119,29 @@ export async function extractTextFromImage(
         const text = result.data.text;
         console.log(`[Tesseract] extracted ${text.length} characters`);
 
-        // Check if Tesseract failed to read anything meaningful
         if (!text || text.length < 10) {
             throw new Error('Tesseract returned empty/low quality text.');
         }
 
         return normalizeText(text);
     } catch (error: any) {
-        console.warn(`[Tesseract] Failed: ${error.message}. Switching to Gemini Fallback...`);
+        console.warn(`[Tesseract] Failed: ${error.message}. Trying Gemini Vision...`);
+
+        // 3. Final fallback: Gemini Vision
         try {
-            // Handle Buffer vs String URL
             let buffer: Buffer;
             if (Buffer.isBuffer(imageSource)) {
                 buffer = imageSource;
+            } else if (typeof imageSource === 'string' && imageSource.startsWith('http')) {
+                buffer = await downloadFile(imageSource);
             } else {
-                // If it's a URL/Path, download/read it (simplified for now assuming Buffer mostly)
-                // For now, if string, we try to download if it's http
-                if (typeof imageSource === 'string' && imageSource.startsWith('http')) {
-                    buffer = await downloadFile(imageSource);
-                } else {
-                    throw new Error('Gemini fallback requires a Buffer or HTTP URL.');
-                }
+                throw new Error('Gemini fallback requires a Buffer or HTTP URL.');
             }
 
             return await extractTextFromImageWithGemini(buffer, mimeType);
         } catch (geminiError: any) {
             console.error('[OCR] All methods failed:', geminiError.message);
-            throw new Error('OCR Failed (Tesseract & Gemini)');
+            throw new Error('OCR Failed (LlamaParse, Tesseract & Gemini)');
         }
     }
 }
@@ -124,20 +154,14 @@ export async function extractTextFromImage(
  */
 export function normalizeText(text: string): string {
     return text
-        // Remove null bytes and dangerous control characters, but keep common symbols
         .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
-        // Normalize line endings
         .replace(/\r\n/g, '\n')
         .replace(/\r/g, '\n')
-        // Remove excessive line breaks (more than 2)
         .replace(/\n{3,}/g, '\n\n')
-        // Remove excessive spaces
         .replace(/[ \t]+/g, ' ')
-        // Remove leading/trailing whitespace from each line
         .split('\n')
         .map(line => line.trim())
         .join('\n')
-        // Remove empty lines at start/end
         .trim();
 }
 

@@ -149,6 +149,94 @@ export const sendChatMessage = async (request: ChatRequest): Promise<ChatRespons
     }
 };
 
+export type VoiceResponse = {
+    success: boolean;
+    transcript: string;
+    voice_summary: string;
+    structured_data: any;
+    audio_base64: string;
+    error?: string;
+};
+
+/**
+ * Send voice audio/text to backend
+ */
+export const sendVoiceMessage = async (userId: string, content: string, sessionId?: string, isText: boolean = false): Promise<VoiceResponse> => {
+    try {
+        const url = `${getBackendUrl()}/api/voice`;
+        const headers = await getHeaders();
+
+        if (isText) {
+            console.log(`[BackendApi] Sending voice TEXT: "${content}"`);
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({
+                    userId,
+                    text: content,
+                    sessionId
+                }),
+            });
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || `HTTP ${response.status}`);
+            }
+            return await response.json();
+        }
+
+        // Audio File Flow
+        const formData = new FormData();
+        formData.append('userId', userId);
+        if (sessionId) formData.append('sessionId', sessionId);
+
+        const filename = content.split('/').pop() || 'recording.m4a';
+        const fileType = filename.split('.').pop() === 'android' ? 'audio/m4a' : 'audio/m4a';
+
+        // @ts-ignore
+        formData.append('audio', {
+            uri: content,
+            name: filename,
+            type: fileType,
+        });
+
+        // FormData usually requires letting fetch set the Content-Type header with boundary
+        // But getHeaders() sets Content-Type to application/json by default.
+        // We need to override it or use a separate header generation.
+        // Let's manually handle headers for FormData.
+
+        // Get token only
+        const firebaseUser = useAuthStore.getState().firebaseUser;
+        const token = firebaseUser ? await firebaseUser.getIdToken() : null;
+
+        const formHeaders: any = {};
+        if (token) formHeaders['Authorization'] = `Bearer ${token}`;
+        // Do NOT set Content-Type for FormData, fetch does it.
+
+        const response = await fetch(url, {
+            method: 'POST',
+            body: formData,
+            headers: formHeaders,
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `HTTP ${response.status}`);
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error('Voice message error:', error);
+        return {
+            success: false,
+            transcript: '',
+            voice_summary: '',
+            structured_data: {},
+            audio_base64: '',
+            error: error instanceof Error ? error.message : 'Voice request failed',
+        };
+    }
+};
+
 /**
  * Stream chat response
  */
@@ -1076,8 +1164,10 @@ export const getInsightsHistory = async (limit = 20, offset = 0): Promise<{
         document_id: string;
         insight_type: string;
         title: string;
+        ai_summary?: string;
+        document_type?: string;
         created_at: string;
-        documents?: { file_name: string; document_type: string };
+        documents?: { file_name: string; file_type: string };
     }>;
     error?: string
 }> => {

@@ -565,7 +565,7 @@ export function HomeDashboardScreen() {
                 activeOpacity={0.8}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  (navigation as any).navigate('CoachTab', { screen: 'CoachChat', params: { mode: 'scan' } });
+                  (navigation as any).navigate('InsightsTab', { screen: 'CoachChat', params: { mode: 'scan' } });
                 }}
               >
                 <Card

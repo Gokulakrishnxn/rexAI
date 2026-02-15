@@ -152,6 +152,117 @@ export const checkAndSendMedicationReminders = async () => {
     }
 };
 
+/**
+ * Auto-mark doses as 'missed' if overdue by 10+ minutes with no intake logged today.
+ * Runs every poll cycle alongside reminders.
+ */
+export const checkAndMarkMissedDoses = async () => {
+    try {
+        const now = new Date();
+        const today = now.toISOString().split('T')[0];
+
+        // 1. Fetch all active schedules with medication info
+        const { data: schedules, error: schedError } = await supabase
+            .from('medication_schedules')
+            .select(`
+                id,
+                exact_times,
+                medication_id,
+                user_id,
+                medications (
+                    drug_name,
+                    dosage,
+                    form,
+                    frequency_text,
+                    status
+                )
+            `)
+            .eq('medications.status', 'active');
+
+        if (schedError || !schedules || schedules.length === 0) return;
+
+        // 2. Fetch today's intakes for all users (batch)
+        const { data: todayIntakes, error: intakeError } = await supabase
+            .from('medication_intakes')
+            .select('schedule_id, scheduled_time, status')
+            .gte('taken_time', `${today}T00:00:00`)
+            .lte('taken_time', `${today}T23:59:59`);
+
+        if (intakeError) {
+            console.error('[Scheduler] Error fetching intakes for miss-check:', intakeError);
+            return;
+        }
+
+        let missedCount = 0;
+
+        for (const sched of schedules) {
+            const med: any = sched.medications;
+            if (!med) continue;
+
+            const times = sched.exact_times as string[];
+            if (!times || !Array.isArray(times)) continue;
+
+            for (const timeStr of times) {
+                // Parse the scheduled time (supports "08:00", "8:00 AM", "21:00")
+                let hours: number, minutes: number;
+                if (timeStr.includes('AM') || timeStr.includes('PM')) {
+                    const [timePart, period] = timeStr.split(' ');
+                    [hours, minutes] = timePart.split(':').map(Number);
+                    if (period === 'PM' && hours !== 12) hours += 12;
+                    if (period === 'AM' && hours === 12) hours = 0;
+                } else {
+                    [hours, minutes] = timeStr.split(':').map(Number);
+                }
+
+                const doseTime = new Date();
+                doseTime.setHours(hours, minutes, 0, 0);
+
+                const diffMs = now.getTime() - doseTime.getTime();
+                const diffMins = diffMs / 60000;
+
+                // Only process if overdue by 10+ minutes (and not a future dose)
+                if (diffMins < 10) continue;
+
+                // Check if there's already an intake (taken or missed) for this schedule + time today
+                const alreadyLogged = todayIntakes?.some(intake =>
+                    intake.schedule_id === sched.id &&
+                    intake.scheduled_time?.includes(timeStr)
+                );
+
+                if (alreadyLogged) continue;
+
+                // Mark as missed
+                const { error: insertError } = await supabase
+                    .from('medication_intakes')
+                    .insert({
+                        user_id: sched.user_id,
+                        schedule_id: sched.id,
+                        drug_name: med.drug_name,
+                        dosage: med.dosage,
+                        form: med.form,
+                        frequency_text: med.frequency_text,
+                        scheduled_time: timeStr,
+                        taken_time: now.toISOString(),
+                        status: 'missed',
+                    });
+
+                if (!insertError) {
+                    missedCount++;
+                    console.log(`[Scheduler] ⏰ Marked MISSED: ${med.drug_name} (${timeStr}) for user ${sched.user_id}`);
+                } else {
+                    console.warn(`[Scheduler] Failed to mark missed:`, insertError.message);
+                }
+            }
+        }
+
+        if (missedCount > 0) {
+            console.log(`[Scheduler] Marked ${missedCount} dose(s) as missed this cycle.`);
+        }
+
+    } catch (error) {
+        console.error('[Scheduler] Miss-check critical error:', error);
+    }
+};
 
 /**
  * Core Scheduling Loop
@@ -161,6 +272,9 @@ const scheduleNextRun = async () => {
 
     // 1. Check/Send reminders NOW (Poll)
     await checkAndSendMedicationReminders();
+
+    // 1.5 Auto-mark overdue doses as missed
+    await checkAndMarkMissedDoses();
 
     // 2. Decide next run time
     const nextDoseTime = await getNextScheduledTime();

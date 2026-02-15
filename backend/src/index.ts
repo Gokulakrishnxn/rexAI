@@ -13,6 +13,7 @@ import sessionsRouter from './routes/sessions.js';
 import profileRouter from './routes/profile.js';
 import nutritionRouter from './routes/nutrition.js';
 import insightsRouter from './routes/insights.js';
+import voiceRouter from './routes/voice.js'; // [NEW]
 import { initEmbeddings } from './services/embeddings.js';
 import { startMedicationScheduler } from './services/medicationScheduler.js';
 
@@ -50,6 +51,7 @@ app.use('/api/sessions', sessionsRouter);
 app.use('/api/profile', profileRouter);
 app.use('/api/nutrition', nutritionRouter);
 app.use('/api/insights', insightsRouter);
+app.use('/api/voice', voiceRouter); // [NEW]
 
 // Advanced Ingestion (Hybrid)
 import ingestAdvancedRouter from './routes/ingestAdvanced.js';

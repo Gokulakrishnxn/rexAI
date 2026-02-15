@@ -155,10 +155,12 @@ router.get('/history', verifyFirebaseToken as any, async (req: FirebaseRequest, 
                 document_id,
                 insight_type,
                 title,
+                ai_summary,
+                document_type,
                 created_at,
                 documents:document_id (
                     file_name,
-                    document_type
+                    file_type
                 )
             `)
             .eq('user_id', userId)

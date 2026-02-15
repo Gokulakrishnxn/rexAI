@@ -1,7 +1,7 @@
 /**
  * ChatGPT Service
  * Handles OpenAI API calls for summarization and chat responses
- * Fallback to Google Gemini if OpenAI/OpenRouter fails
+ * Fallback to Google Gemini if OpenAI fails
  */
 
 import dotenv from 'dotenv';
@@ -11,16 +11,10 @@ import { generateGeminiSummary, generateGeminiChatResponse, streamGeminiChatResp
 dotenv.config();
 
 console.log('Initializing OpenAI...');
-console.log('Base URL:', process.env.OPENAI_BASE_URL);
 console.log('API Key:', process.env.OPENAI_API_KEY ? process.env.OPENAI_API_KEY.substring(0, 10) + '...' : 'MISSING');
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
-    baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
-    defaultHeaders: {
-        'HTTP-Referer': 'https://github.com/rex-healthify',
-        'X-Title': 'Rex Healthify',
-    },
 });
 
 /**
@@ -165,7 +159,7 @@ Keep the summary concise(2 - 3 paragraphs max).`,
                 },
             ],
             temperature: 0.3,
-            max_tokens: 500,
+            max_tokens: 1000,
         });
 
         return response.choices[0]?.message?.content || 'Summary could not be generated.';
@@ -216,7 +210,7 @@ ${question}
         const response = await openai.chat.completions.create({
             model: 'gpt-4o',
             messages,
-            temperature: 0.4,
+            temperature: 0.1,
             max_tokens: 1000,
         });
 
@@ -268,7 +262,7 @@ ${question} `,
         const stream = await openai.chat.completions.create({
             model: 'gpt-4o',
             messages,
-            temperature: 0.4,
+            temperature: 0.1,
             max_tokens: 1000,
             stream: true,
         });

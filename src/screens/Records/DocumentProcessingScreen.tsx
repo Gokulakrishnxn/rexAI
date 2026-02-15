@@ -31,11 +31,12 @@ const PROCESSING_STEPS: ProcessingStep[] = [
 export function DocumentProcessingScreen() {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute();
-  const { fileUri, fileName, mimeType, userId } = route.params as {
+  const { fileUri, fileName, mimeType, userId, targetScreen } = route.params as {
     fileUri: string;
     fileName: string;
     mimeType: string;
     userId: string;
+    targetScreen?: string;
   };
 
   const { addRecord, updateRecord, removeRecord } = useRecordsStore();
@@ -138,8 +139,8 @@ export function DocumentProcessingScreen() {
           updateStepStatus(2, 'failed');
           setSteps(prev => {
             const updated = [...prev];
-            updated[2] = { 
-              ...updated[2], 
+            updated[2] = {
+              ...updated[2],
               status: 'failed',
               errorMessage: failReason
             };
@@ -147,7 +148,7 @@ export function DocumentProcessingScreen() {
           });
           setHasError(true);
           setErrorReason(failReason);
-          
+
           updateRecord(recordId, {
             ingestionStatus: 'error',
             ingestionError: ingestResult.error,
@@ -175,16 +176,23 @@ export function DocumentProcessingScreen() {
         updateStepStatus(3, 'completed');
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-        // Navigate to Records screen on success
+        // Navigate to Records screen or target screen on success
         await delay(500);
         if (!cancelled) {
-          navigation.replace('RecordsDashboard');
+          if (targetScreen === 'MedicalInsights' && ingestResult.documentId) {
+            navigation.replace('MedicalInsights', {
+              documentId: ingestResult.documentId,
+              documentTitle: fileName,
+            });
+          } else {
+            navigation.replace('RecordsDashboard');
+          }
         }
 
       } catch (error: any) {
         if (!cancelled) {
           const errorMsg = error.message || 'An unexpected error occurred';
-          
+
           // Determine which step failed
           if (currentStep === 0) {
             updateStepStatus(0, 'failed');
@@ -211,7 +219,7 @@ export function DocumentProcessingScreen() {
 
           setHasError(true);
           setErrorReason(errorMsg);
-          
+
           updateRecord(recordId, {
             ingestionStatus: 'error',
             ingestionError: errorMsg,
@@ -314,7 +322,7 @@ export function DocumentProcessingScreen() {
             {hasError ? 'Analysis Interrupted' : 'Processing Document'}
           </Text>
           <Text fontSize={15} color="#8E8E93" marginTop={8} textAlign="center">
-            {hasError 
+            {hasError
               ? 'There was an issue processing your medical document.'
               : 'Please wait while our AI processes your document.'
             }
@@ -350,10 +358,10 @@ export function DocumentProcessingScreen() {
                         step.status === 'completed'
                           ? '#1C1C1E'
                           : step.status === 'active'
-                          ? '#007AFF'
-                          : step.status === 'failed'
-                          ? '#FF3B30'
-                          : '#C7C7CC'
+                            ? '#007AFF'
+                            : step.status === 'failed'
+                              ? '#FF3B30'
+                              : '#C7C7CC'
                       }
                     >
                       {step.label}
@@ -377,8 +385,8 @@ export function DocumentProcessingScreen() {
         </YStack>
 
         {/* Bottom Button */}
-        <TouchableOpacity 
-          style={styles.cancelButton} 
+        <TouchableOpacity
+          style={styles.cancelButton}
           onPress={hasError ? handleDismiss : handleCancel}
         >
           <Text fontSize={16} fontWeight="500" color={hasError ? '#FF3B30' : '#8E8E93'}>

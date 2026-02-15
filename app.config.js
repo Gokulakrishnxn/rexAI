@@ -25,6 +25,7 @@ module.exports = ({ config }) => {
         android: {
             package: "com.rexhealthify.app"
         },
-        "scheme": "rexai"
+        scheme: "rexai",
+        plugins: ["expo-audio"]
     };
 };

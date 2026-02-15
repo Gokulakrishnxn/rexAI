@@ -9,6 +9,7 @@ import {
   View,
   StyleSheet,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { YStack, XStack, Text, Input, Progress } from 'tamagui';
 import { Ionicons } from '@expo/vector-icons';
@@ -442,9 +443,13 @@ export function SignupScreen({ navigation }: Props) {
 
           <YStack flex={1} justifyContent="center" paddingHorizontal="$6">
             {/* Logo Section */}
-            <YStack alignItems="center" marginBottom="$6">
+            <YStack alignItems="center" marginBottom="$4">
               <View style={styles.logoContainer}>
-                <Ionicons name="medical" size={40} color="white" />
+                <Image
+                  source={require('../../../assets/rexdark.png')}
+                  style={styles.logo}
+                  resizeMode="contain"
+                />
               </View>
               <Text style={styles.appName}>Rex.ai</Text>
               <Text style={styles.tagline}>Your Personal Health Intelligence</Text>
@@ -503,24 +508,22 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(16, 185, 129, 0.06)',
   },
   logoContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#3B82F6',
+    width: 100,
+    height: 100,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
-    shadowColor: '#3B82F6',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 8,
+    marginBottom: 8,
+  },
+  logo: {
+    width: '100%',
+    height: '100%',
   },
   appName: {
     fontSize: 36,
     fontWeight: '300',
     color: '#1A1A1A',
     letterSpacing: -1,
+    marginTop: -8,
   },
   tagline: {
     fontSize: 14,

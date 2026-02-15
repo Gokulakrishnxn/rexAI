@@ -9,6 +9,7 @@ import {
   View,
   StyleSheet,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { YStack, XStack, Text, Input } from 'tamagui';
 import { Ionicons } from '@expo/vector-icons';
@@ -144,7 +145,11 @@ export function CompleteProfileScreen({ navigation }: Props) {
                 </Avatar>
               ) : (
                 <View style={styles.logoContainer}>
-                  <Ionicons name="person" size={36} color="white" />
+                  <Image
+                    source={require('../../../assets/rexdark.png')}
+                    style={styles.logo}
+                    resizeMode="contain"
+                  />
                 </View>
               )}
               <Text style={styles.title}>Complete Your Profile</Text>
@@ -395,11 +400,13 @@ const styles = StyleSheet.create({
   logoContainer: {
     width: 80,
     height: 80,
-    borderRadius: 40,
-    backgroundColor: '#3B82F6',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
+  },
+  logo: {
+    width: '100%',
+    height: '100%',
   },
   title: {
     fontSize: 24,

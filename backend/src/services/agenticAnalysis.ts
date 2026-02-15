@@ -27,7 +27,6 @@ dotenv.config();
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
-    baseURL: process.env.OPENAI_BASE_URL,
 });
 
 const gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -40,12 +39,12 @@ async function callAIWithFallback(
     options: { temperature?: number; maxTokens?: number; jsonMode?: boolean } = {}
 ): Promise<string> {
     const { temperature = 0.3, maxTokens = 4096, jsonMode = true } = options;
-    
+
     // Try OpenAI first
     try {
         log('AI-CALL', 'Attempting OpenAI...');
         const response = await openai.chat.completions.create({
-            model: 'gpt-4',
+            model: 'gpt-4o',
             messages: [
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: userPrompt }
@@ -54,19 +53,19 @@ async function callAIWithFallback(
             max_tokens: maxTokens,
             ...(jsonMode ? { response_format: { type: "json_object" } } : {})
         });
-        
+
         const content = response.choices[0].message.content || '';
         log('AI-CALL', 'OpenAI succeeded');
         return content;
     } catch (openaiError: any) {
         log('AI-CALL', `OpenAI failed: ${openaiError.message || openaiError}, trying Gemini...`);
     }
-    
+
     // Fallback to Gemini
     try {
         log('AI-CALL', 'Attempting Gemini...');
         const fullPrompt = `${systemPrompt}\n\n${userPrompt}${jsonMode ? '\n\nIMPORTANT: Respond ONLY with valid JSON, no markdown code blocks.' : ''}`;
-        
+
         const response = await gemini.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: [
@@ -80,16 +79,16 @@ async function callAIWithFallback(
                 temperature,
             }
         });
-        
+
         let content = response.text || '';
-        
+
         // Clean up markdown code blocks if present
         if (content.startsWith('```json')) {
             content = content.replace(/^```json\n?/, '').replace(/\n?```$/, '');
         } else if (content.startsWith('```')) {
             content = content.replace(/^```\n?/, '').replace(/\n?```$/, '');
         }
-        
+
         log('AI-CALL', 'Gemini succeeded');
         return content;
     } catch (geminiError: any) {
@@ -255,24 +254,24 @@ export async function fetchDocument(documentId: string): Promise<{
     summary?: string;
 } | null> {
     log('1-FETCH_DOCUMENT', `Fetching document ${documentId} from Supabase...`);
-    
+
     const { data: doc, error } = await supabase
         .from('documents')
         .select('file_url, file_name, file_type, extracted_text, summary')
         .eq('id', documentId)
         .single();
-    
+
     if (error || !doc) {
         logError('1-FETCH_DOCUMENT', error || 'Document not found');
         return null;
     }
-    
+
     log('1-FETCH_DOCUMENT', `Found document: ${doc.file_name}`, {
         hasExtractedText: !!doc.extracted_text,
         hasSummary: !!doc.summary,
         fileType: doc.file_type
     });
-    
+
     return {
         fileUrl: doc.file_url,
         fileName: doc.file_name,
@@ -286,16 +285,16 @@ export async function fetchDocument(documentId: string): Promise<{
 
 async function downloadFileToTemp(fileUrl: string, fileName: string): Promise<string> {
     log('2-DOWNLOAD', `Downloading file from ${fileUrl.substring(0, 50)}...`);
-    
+
     const response = await fetch(fileUrl);
     if (!response.ok) {
         throw new Error(`Failed to download file: ${response.status}`);
     }
-    
+
     const buffer = Buffer.from(await response.arrayBuffer());
     const tempPath = path.join(os.tmpdir(), `rexai_${Date.now()}_${fileName}`);
     fs.writeFileSync(tempPath, buffer);
-    
+
     log('2-DOWNLOAD', `File saved to temp: ${tempPath}`, { size: buffer.length });
     return tempPath;
 }
@@ -303,18 +302,18 @@ async function downloadFileToTemp(fileUrl: string, fileName: string): Promise<st
 export async function parseDocument(fileUrl: string, fileName: string, fileType: string): Promise<string> {
     log('2-PARSE_DOCUMENT', `Parsing document with LlamaParse...`);
     log('2-PARSE_DOCUMENT', `File: ${fileName}, Type: ${fileType}`);
-    
+
     const tempPath = await downloadFileToTemp(fileUrl, fileName);
-    
+
     try {
         const markdown = await parseWithLlamaCloud(tempPath, fileType);
         log('2-PARSE_DOCUMENT', `Successfully extracted ${markdown.length} characters`);
-        
+
         // Cleanup
         if (fs.existsSync(tempPath)) {
             fs.unlinkSync(tempPath);
         }
-        
+
         return markdown;
     } catch (error: any) {
         // Cleanup on error too
@@ -349,22 +348,22 @@ Extract ALL medications, conditions, and diagnoses. Be thorough.`;
 export async function extractMedicalData(text: string): Promise<ExtractedMedicalData> {
     log('3-EXTRACT_MEDICAL', `Extracting medical data using AI...`);
     log('3-EXTRACT_MEDICAL', `Input text length: ${text.length} chars`);
-    
+
     try {
         const rawJson = await callAIWithFallback(
             MEDICAL_EXTRACTION_PROMPT,
             `MEDICAL DOCUMENT:\n${text.substring(0, 8000)}`,
             { temperature: 0.2, jsonMode: true }
         );
-        
+
         const parsed = JSON.parse(rawJson);
-        
+
         log('3-EXTRACT_MEDICAL', `Extracted data:`, {
             conditions: parsed.conditions?.length || 0,
             medications: parsed.medications?.length || 0,
             diagnoses: parsed.diagnoses?.length || 0
         });
-        
+
         return {
             conditions: parsed.conditions || [],
             medications: parsed.medications || [],
@@ -389,12 +388,12 @@ export async function extractMedicalData(text: string): Promise<ExtractedMedical
 
 export async function enrichWithRxNorm(medications: ExtractedMedicalData['medications']): Promise<ExtractedMedicalData['medications']> {
     log('4-RXNORM_ENRICH', `Enriching ${medications.length} medications with RxNorm data...`);
-    
+
     const enriched = await Promise.all(medications.map(async (med, idx) => {
         log('4-RXNORM_ENRICH', `[${idx + 1}/${medications.length}] Looking up: ${med.name}`);
-        
+
         const rxData = await searchDrug(med.name);
-        
+
         if (rxData) {
             log('4-RXNORM_ENRICH', `   Found RxCUI: ${rxData.rxcui} (${rxData.name})`);
             return {
@@ -407,10 +406,10 @@ export async function enrichWithRxNorm(medications: ExtractedMedicalData['medica
             return med;
         }
     }));
-    
+
     const foundCount = enriched.filter(m => m.rxcui).length;
     log('4-RXNORM_ENRICH', `Enriched ${foundCount}/${medications.length} medications with RxNorm data`);
-    
+
     return enriched;
 }
 
@@ -418,17 +417,17 @@ export async function enrichWithRxNorm(medications: ExtractedMedicalData['medica
 
 export async function checkInteractionsStep(medications: ExtractedMedicalData['medications']): Promise<DrugInteraction[]> {
     const rxcuis = medications.filter(m => m.rxcui).map(m => m.rxcui!);
-    
+
     if (rxcuis.length < 2) {
         log('5-INTERACTIONS', 'Less than 2 medications with RxCUI, skipping interaction check');
         return [];
     }
-    
+
     log('5-INTERACTIONS', `Checking interactions for ${rxcuis.length} drugs...`);
-    
+
     const interactions = await checkDrugInteractionsAPI(rxcuis);
     log('5-INTERACTIONS', `Found ${interactions.length} potential interactions`);
-    
+
     return interactions;
 }
 
@@ -460,20 +459,20 @@ export async function diagnoseFromMedications(
     medications: ExtractedMedicalData['medications']
 ): Promise<DiagnosedCondition[]> {
     log('5.5-DIAGNOSE', `Inferring conditions from ${medications.length} medications...`);
-    
+
     if (medications.length === 0) {
         return [];
     }
-    
+
     const medList = medications.map(m => `${m.name} ${m.dosage || ''} (${m.purpose || 'unknown purpose'})`).join('\n');
-    
+
     try {
         const rawJson = await callAIWithFallback(
             DRUG_DIAGNOSIS_PROMPT,
             `MEDICATIONS PRESCRIBED:\n${medList}`,
             { temperature: 0.2, jsonMode: true }
         );
-        
+
         const parsed = JSON.parse(rawJson);
         const conditions: DiagnosedCondition[] = (parsed.diagnosedConditions || []).map((c: any) => ({
             condition: c.condition || '',
@@ -482,7 +481,7 @@ export async function diagnoseFromMedications(
             description: c.description || '',
             commonSymptoms: c.commonSymptoms || []
         }));
-        
+
         log('5.5-DIAGNOSE', `Inferred ${conditions.length} conditions from medications`);
         return conditions;
     } catch (error) {
@@ -521,12 +520,12 @@ export async function generateDoctorAssessment(
     interactions: DrugInteraction[]
 ): Promise<DoctorAssessment> {
     log('5.6-DOCTOR', `Generating doctor's assessment...`);
-    
+
     const allConditions = [
         ...conditions.map(c => c.name),
         ...diagnosedConditions.map(c => c.condition)
     ].filter((v, i, a) => a.indexOf(v) === i);
-    
+
     const context = `
 PATIENT CONDITIONS: ${allConditions.join(', ') || 'General health consultation'}
 MEDICATIONS PRESCRIBED: ${medications.map(m => `${m.name} ${m.dosage || ''} ${m.frequency || ''}`).join('; ') || 'None'}
@@ -539,9 +538,9 @@ DRUG INTERACTIONS: ${interactions.length > 0 ? interactions.map(i => `${i.drug1}
             context,
             { temperature: 0.4, jsonMode: true }
         );
-        
+
         const parsed = JSON.parse(rawJson);
-        
+
         const assessment: DoctorAssessment = {
             greeting: parsed.greeting || 'Thank you for your visit today.',
             diagnosis: parsed.diagnosis || 'Based on the prescription, we are addressing your health concerns.',
@@ -550,7 +549,7 @@ DRUG INTERACTIONS: ${interactions.length > 0 ? interactions.map(i => `${i.drug1}
             warnings: parsed.warnings || [],
             followUp: parsed.followUp || 'Please schedule a follow-up if symptoms persist.'
         };
-        
+
         log('5.6-DOCTOR', `Doctor assessment generated successfully`);
         return assessment;
     } catch (error) {
@@ -590,11 +589,11 @@ export async function generateMedicationInsights(
     conditions: ExtractedMedicalData['conditions']
 ): Promise<MedicationInsight[]> {
     log('6-MED_INSIGHTS', `Generating insights for ${medications.length} medications...`);
-    
+
     if (medications.length === 0) {
         return [];
     }
-    
+
     const context = `
 CONDITIONS: ${conditions.map(c => c.name).join(', ')}
 MEDICATIONS: ${medications.map(m => `${m.name} ${m.dosage || ''} ${m.frequency || ''}`).join('; ')}
@@ -606,13 +605,13 @@ MEDICATIONS: ${medications.map(m => `${m.name} ${m.dosage || ''} ${m.frequency |
             context,
             { temperature: 0.3, jsonMode: true }
         );
-        
+
         // Handle both array and object with insights property
         let parsed = JSON.parse(rawJson);
         if (!Array.isArray(parsed)) {
             parsed = parsed.insights || parsed.medications || [];
         }
-        
+
         const insights: MedicationInsight[] = parsed.map((p: any) => ({
             medication: p.medication || '',
             rxcui: medications.find(m => m.name.toLowerCase().includes(p.medication?.toLowerCase()))?.rxcui,
@@ -621,7 +620,7 @@ MEDICATIONS: ${medications.map(m => `${m.name} ${m.dosage || ''} ${m.frequency |
             sideEffects: p.sideEffects || [],
             precautions: p.precautions || []
         }));
-        
+
         log('6-MED_INSIGHTS', `Generated insights for ${insights.length} medications`);
         return insights;
     } catch (error) {
@@ -670,12 +669,12 @@ export async function generateFoodRecommendations(
     diagnosedConditions: DiagnosedCondition[]
 ): Promise<FoodRecommendation[]> {
     log('7-FOOD_RECS', `Generating food recommendations with nutrition data...`);
-    
+
     const allConditions = [
         ...conditions.map(c => `${c.name} (${c.severity})`),
         ...diagnosedConditions.map(c => `${c.condition} (inferred)`)
     ].join(', ') || 'General health improvement';
-    
+
     const context = `
 CONDITIONS TO ADDRESS: ${allConditions}
 MEDICATIONS: ${medications.map(m => m.name).join(', ') || 'None specified'}
@@ -689,9 +688,9 @@ Recommend foods that can help cure or significantly improve these conditions.
             context,
             { temperature: 0.3, jsonMode: true }
         );
-        
+
         const parsed = JSON.parse(rawJson);
-        
+
         const recommendations: FoodRecommendation[] = (parsed.recommendations || []).map((r: any) => ({
             category: r.category || 'General',
             foods: r.foods || [],
@@ -705,7 +704,7 @@ Recommend foods that can help cure or significantly improve these conditions.
                 vitamins: r.nutrition.vitamins || []
             } : undefined
         }));
-        
+
         log('7-FOOD_RECS', `Generated ${recommendations.length} food categories with nutrition data`);
         return recommendations;
     } catch (error) {
@@ -745,12 +744,12 @@ export async function generateSafetyInsights(
     diagnosedConditions: DiagnosedCondition[]
 ): Promise<SafetyInsight[]> {
     log('8-SAFETY', `Generating safety Q&A...`);
-    
+
     const allConditions = [
         ...conditions.map(c => `${c.name} (${c.severity})`),
         ...diagnosedConditions.map(c => `${c.condition} (inferred from meds)`)
     ].join(', ') || 'None specified';
-    
+
     const context = `
 CONDITIONS: ${allConditions}
 MEDICATIONS: ${medications.map(m => `${m.name} ${m.dosage || ''}`).join('; ') || 'None specified'}
@@ -763,15 +762,15 @@ DRUG INTERACTIONS: ${interactions.length > 0 ? interactions.map(i => `${i.drug1}
             context,
             { temperature: 0.3, jsonMode: true }
         );
-        
+
         const parsed = JSON.parse(rawJson);
-        
+
         const insights: SafetyInsight[] = (parsed.insights || []).map((i: any) => ({
             question: i.question || '',
             answer: i.answer || '',
             riskLevel: i.riskLevel || 'safe'
         }));
-        
+
         log('8-SAFETY', `Generated ${insights.length} safety insights`);
         return insights;
     } catch (error) {
@@ -793,20 +792,20 @@ export async function generateFinalInsights(
     diagnosedConditions: DiagnosedCondition[]
 ): Promise<FullAnalysisResult> {
     log('9-FINAL_OUTPUT', `Generating final structured output...`);
-    
+
     // Determine document type
-    const docType = extractedData.medications.length > 0 ? 'prescription' : 
-                    extractedData.conditions.length > 0 ? 'diagnosis' : 'medical_document';
-    
+    const docType = extractedData.medications.length > 0 ? 'prescription' :
+        extractedData.conditions.length > 0 ? 'diagnosis' : 'medical_document';
+
     // Build comprehensive overview (Section 1: AI Summary - Clinical/factual tone, NOT conversational)
     const allConditions = [
         ...extractedData.conditions.map(c => c.name),
         ...diagnosedConditions.map(c => c.condition)
     ].filter((v, i, a) => a.indexOf(v) === i);
-    
+
     // Generate clinical summary (factual, concise - separate from conversational doctor's assessment)
     let overview = '';
-    
+
     // Document type summary
     if (extractedData.medications.length > 0) {
         overview += `This prescription contains ${extractedData.medications.length} medication(s)`;
@@ -820,7 +819,7 @@ export async function generateFinalInsights(
     } else {
         overview += 'Medical document analyzed. ';
     }
-    
+
     // Medication breakdown
     if (extractedData.medications.length > 0) {
         const medNames = extractedData.medications.slice(0, 4).map(m => m.name);
@@ -830,7 +829,7 @@ export async function generateFinalInsights(
         }
         overview += '. ';
     }
-    
+
     // Safety status
     if (drugInteractions.length > 0) {
         const highRiskCount = drugInteractions.filter(i => i.severity === 'high').length;
@@ -842,15 +841,15 @@ export async function generateFinalInsights(
     } else if (extractedData.medications.length > 1) {
         overview += 'No significant drug interactions detected. ';
     }
-    
+
     // Food interaction note
     if (foodRecommendations.length > 0) {
         overview += `${foodRecommendations.length} dietary recommendation(s) provided based on your medications and conditions.`;
     }
-    
+
     // Build key findings
     const keyFindings: FullAnalysisResult['keyFindings'] = [];
-    
+
     // Add diagnosed conditions from medications
     diagnosedConditions.forEach(dc => {
         keyFindings.push({
@@ -860,7 +859,7 @@ export async function generateFinalInsights(
             reference: `Inferred from: ${dc.inferredFrom.join(', ')}`
         });
     });
-    
+
     extractedData.conditions.forEach(c => {
         keyFindings.push({
             category: 'Condition',
@@ -868,7 +867,7 @@ export async function generateFinalInsights(
             status: c.severity === 'high' ? 'critical' : c.severity === 'medium' ? 'abnormal' : 'info'
         });
     });
-    
+
     extractedData.medications.forEach(m => {
         keyFindings.push({
             category: 'Medication',
@@ -878,7 +877,7 @@ export async function generateFinalInsights(
             reference: m.frequency
         });
     });
-    
+
     drugInteractions.forEach(i => {
         keyFindings.push({
             category: 'Drug Interaction',
@@ -886,7 +885,7 @@ export async function generateFinalInsights(
             status: i.severity === 'high' ? 'critical' : i.severity === 'moderate' ? 'abnormal' : 'info'
         });
     });
-    
+
     // Build recommendations from medication insights
     const recommendations: string[] = [];
     medicationInsights.forEach(mi => {
@@ -895,17 +894,17 @@ export async function generateFinalInsights(
         }
         mi.precautions.slice(0, 2).forEach(p => recommendations.push(p));
     });
-    
+
     // Add food recommendations to recommendations
     foodRecommendations.forEach(fr => {
         if (fr.benefit) {
             recommendations.push(`${fr.category}: ${fr.benefit}`);
         }
     });
-    
+
     // Build follow-up actions
     const followUpActions: FullAnalysisResult['followUpActions'] = [];
-    
+
     if (drugInteractions.some(i => i.severity === 'high')) {
         followUpActions.push({
             action: 'Consult doctor about potential drug interactions',
@@ -913,7 +912,7 @@ export async function generateFinalInsights(
             timeframe: 'Immediately'
         });
     }
-    
+
     extractedData.conditions.filter(c => c.severity === 'high').forEach(c => {
         followUpActions.push({
             action: `Follow up on ${c.name}`,
@@ -921,7 +920,7 @@ export async function generateFinalInsights(
             timeframe: '1-2 weeks'
         });
     });
-    
+
     if (extractedData.medications.length > 0) {
         followUpActions.push({
             action: 'Take medications as prescribed',
@@ -929,7 +928,7 @@ export async function generateFinalInsights(
             timeframe: 'Daily'
         });
     }
-    
+
     // Build charts data with nutrition bars
     const charts: FullAnalysisResult['charts'] = {
         vitals: [],
@@ -941,7 +940,7 @@ export async function generateFinalInsights(
         nutritionBars: [],
         trends: []
     };
-    
+
     // Generate trends data for interactive line chart (always show chart)
     // Create a health improvement trend based on the medications/conditions
     const today = new Date();
@@ -949,17 +948,17 @@ export async function generateFinalInsights(
         const dataPoints = [];
         const baseValue = 110; // Starting value
         const targetValue = 95; // Target healthy value
-        
+
         for (let i = 3; i >= 0; i--) {
             const date = new Date(today);
             date.setMonth(date.getMonth() - i);
-            
+
             // Simulate gradual improvement with some variance
             const progress = (3 - i) / 3;
             const improvement = baseValue - (baseValue - targetValue) * progress;
             const variance = (Math.random() - 0.5) * 10;
             const value = Math.round(improvement + variance);
-            
+
             dataPoints.push({
                 date: date.toISOString().split('T')[0],
                 value: Math.max(80, Math.min(130, value))
@@ -967,13 +966,13 @@ export async function generateFinalInsights(
         }
         return dataPoints;
     };
-    
+
     // Add default trends - Health Score trend
     charts.trends.push({
         label: 'Health Score',
         data: generateTrendData()
     });
-    
+
     // Add medication adherence trend if medications exist
     if (extractedData.medications.length > 0) {
         charts.trends.push({
@@ -981,7 +980,7 @@ export async function generateFinalInsights(
             data: generateTrendData()
         });
     }
-    
+
     // Add nutrition data from food recommendations
     foodRecommendations.forEach(fr => {
         if (fr.nutrition) {
@@ -1011,7 +1010,7 @@ export async function generateFinalInsights(
             }
         }
     });
-    
+
     // Add condition severity as progress bars
     extractedData.conditions.forEach(c => {
         const severityScore = c.severity === 'high' ? 90 : c.severity === 'medium' ? 60 : 30;
@@ -1022,7 +1021,7 @@ export async function generateFinalInsights(
             unit: '% severity'
         });
     });
-    
+
     // Add diagnosed conditions to progress bars
     diagnosedConditions.forEach(dc => {
         const confidenceScore = dc.confidence === 'high' ? 90 : dc.confidence === 'medium' ? 60 : 30;
@@ -1033,7 +1032,7 @@ export async function generateFinalInsights(
             unit: '% confidence'
         });
     });
-    
+
     // Combine all conditions
     const allConditionsForResult = [
         ...extractedData.conditions.map(c => ({
@@ -1047,7 +1046,7 @@ export async function generateFinalInsights(
             notes: dc.description
         }))
     ];
-    
+
     const result: FullAnalysisResult = {
         title: extractedData.diagnoses[0] || diagnosedConditions[0]?.condition || 'Medical Document Analysis',
         documentType: docType,
@@ -1066,7 +1065,7 @@ export async function generateFinalInsights(
         charts,
         cachedAt: new Date().toISOString()
     };
-    
+
     log('9-FINAL_OUTPUT', `Final output generated:`, {
         keyFindings: result.keyFindings.length,
         recommendations: result.recommendations.length,
@@ -1074,7 +1073,7 @@ export async function generateFinalInsights(
         diagnosedConditions: result.diagnosedConditions.length,
         nutritionBars: result.charts.nutritionBars.length
     });
-    
+
     return result;
 }
 
@@ -1087,14 +1086,14 @@ export async function storeAnalysisResult(
     extractedText: string
 ): Promise<void> {
     log('10-STORE', `Storing analysis result in Supabase...`);
-    
+
     try {
         // Update document with extracted text
         await supabase
             .from('documents')
             .update({ extracted_text: extractedText })
             .eq('id', documentId);
-        
+
         // Prepare insight data matching the new table schema
         const insightData = {
             document_id: documentId,
@@ -1119,21 +1118,21 @@ export async function storeAnalysisResult(
             is_current: true,
             updated_at: new Date().toISOString()
         };
-        
+
         // Use upsert with ON CONFLICT
         const { error: insightError } = await supabase
             .from('insights')
-            .upsert(insightData, { 
+            .upsert(insightData, {
                 onConflict: 'document_id',
                 ignoreDuplicates: false
             });
-        
+
         if (insightError) {
             log('10-STORE', `Insights table storage warning: ${insightError.message}`);
         } else {
             log('10-STORE', `Insights stored successfully for document ${documentId}`);
         }
-        
+
         // Store conditions in user_conditions table
         if (result.conditions && result.conditions.length > 0) {
             const conditionRecords = result.conditions.map(c => ({
@@ -1145,18 +1144,18 @@ export async function storeAnalysisResult(
                 status: 'active',
                 source: 'document'
             }));
-            
+
             const { error: condError } = await supabase
                 .from('user_conditions')
                 .upsert(conditionRecords, { onConflict: 'id' });
-            
+
             if (condError) {
                 log('10-STORE', `User conditions storage warning: ${condError.message}`);
             } else {
                 log('10-STORE', `User conditions stored: ${conditionRecords.length} records`);
             }
         }
-        
+
         // Store diagnosed conditions (inferred from medications)
         if (result.diagnosedConditions && result.diagnosedConditions.length > 0) {
             const inferredRecords = result.diagnosedConditions.map(dc => ({
@@ -1170,16 +1169,16 @@ export async function storeAnalysisResult(
                 confidence: dc.confidence === 'high' ? 0.9 : dc.confidence === 'medium' ? 0.7 : 0.5,
                 medications_linked: dc.inferredFrom || []
             }));
-            
+
             const { error: inferredError } = await supabase
                 .from('user_conditions')
                 .upsert(inferredRecords, { onConflict: 'id' });
-            
+
             if (inferredError) {
                 log('10-STORE', `Inferred conditions storage warning: ${inferredError.message}`);
             }
         }
-        
+
         // Store prescription nutrition recommendations
         if (result.foodRecommendations && result.foodRecommendations.length > 0) {
             const nutritionRecords = result.foodRecommendations.map(fr => ({
@@ -1193,24 +1192,24 @@ export async function storeAnalysisResult(
                 target_conditions: [], // Could be enhanced with condition matching
                 is_active: true
             }));
-            
+
             // Delete existing recommendations for this document first
             await supabase
                 .from('prescription_nutrition')
                 .delete()
                 .eq('document_id', documentId);
-            
+
             const { error: nutritionError } = await supabase
                 .from('prescription_nutrition')
                 .insert(nutritionRecords);
-            
+
             if (nutritionError) {
                 log('10-STORE', `Prescription nutrition storage warning: ${nutritionError.message}`);
             } else {
                 log('10-STORE', `Prescription nutrition stored: ${nutritionRecords.length} recommendations`);
             }
         }
-        
+
         log('10-STORE', `Analysis result stored successfully for document ${documentId}`);
     } catch (error) {
         logError('10-STORE', error);
@@ -1222,7 +1221,7 @@ export async function storeAnalysisResult(
 
 export async function getCachedAnalysis(documentId: string): Promise<FullAnalysisResult | null> {
     log('0-CACHE_CHECK', `Checking for cached analysis of document ${documentId}...`);
-    
+
     // Check insights table first (using new schema)
     const { data: insight, error } = await supabase
         .from('insights')
@@ -1230,10 +1229,10 @@ export async function getCachedAnalysis(documentId: string): Promise<FullAnalysi
         .eq('document_id', documentId)
         .eq('is_current', true)
         .single();
-    
+
     if (insight && !error) {
         log('0-CACHE_CHECK', `Found cached analysis from ${insight.created_at}`);
-        
+
         // If we have the full analysis stored, return it directly
         if (insight.full_analysis) {
             return {
@@ -1241,7 +1240,7 @@ export async function getCachedAnalysis(documentId: string): Promise<FullAnalysi
                 cachedAt: insight.created_at
             };
         }
-        
+
         // Fallback: reconstruct from stored columns (new schema)
         const defaultDoctorAssessment: DoctorAssessment = {
             greeting: 'Based on your medical records...',
@@ -1251,18 +1250,18 @@ export async function getCachedAnalysis(documentId: string): Promise<FullAnalysi
             warnings: [],
             followUp: 'Consult your doctor as needed.'
         };
-        
+
         return {
             title: insight.title,
             documentType: insight.document_type || 'prescription',
             overview: insight.ai_summary,
             doctorAssessment: insight.doctor_assessment || defaultDoctorAssessment,
             diagnosedConditions: insight.diagnosed_conditions || [],
-            extractedData: { 
-                conditions: [], 
-                medications: insight.medications || [], 
-                diagnoses: [], 
-                symptoms: [] 
+            extractedData: {
+                conditions: [],
+                medications: insight.medications || [],
+                diagnoses: [],
+                symptoms: []
             },
             medicationInsights: insight.medication_insights || [],
             drugInteractions: insight.drug_interactions || [],
@@ -1276,11 +1275,11 @@ export async function getCachedAnalysis(documentId: string): Promise<FullAnalysi
             cachedAt: insight.created_at
         };
     }
-    
+
     if (error) {
         log('0-CACHE_CHECK', `Cache check error: ${error.message}`);
     }
-    
+
     log('0-CACHE_CHECK', 'No cached analysis found');
     return null;
 }
@@ -1297,7 +1296,7 @@ export async function runFullAnalysisPipeline(
     console.log(`${LOG_PREFIX} Document ID: ${documentId}`);
     console.log(`${LOG_PREFIX} User ID: ${userId}`);
     console.log('='.repeat(60) + '\n');
-    
+
     // Step 0: Check cache
     if (!forceRefresh) {
         const cached = await getCachedAnalysis(documentId);
@@ -1306,13 +1305,13 @@ export async function runFullAnalysisPipeline(
             return cached;
         }
     }
-    
+
     // Step 1: Fetch document
     const doc = await fetchDocument(documentId);
     if (!doc) {
         throw new Error('Document not found in database');
     }
-    
+
     // Step 2: Parse document (or use existing text)
     let extractedText = doc.existingText;
     if (!extractedText || extractedText.length < 50) {
@@ -1320,19 +1319,19 @@ export async function runFullAnalysisPipeline(
     } else {
         log('2-PARSE_DOCUMENT', 'Using existing extracted text from database');
     }
-    
+
     // Step 3: Extract medical data
     const extractedData = await extractMedicalData(extractedText);
-    
+
     // Step 4: Enrich with RxNorm
     extractedData.medications = await enrichWithRxNorm(extractedData.medications);
-    
+
     // Step 5: Check drug interactions
     const drugInteractions = await checkInteractionsStep(extractedData.medications);
-    
+
     // Step 5.5: Diagnose conditions from medications (BioGPT/PubMedBERT approach)
     const diagnosedConditions = await diagnoseFromMedications(extractedData.medications);
-    
+
     // Step 5.6: Generate doctor's assessment
     const doctorAssessment = await generateDoctorAssessment(
         extractedData.conditions,
@@ -1340,20 +1339,20 @@ export async function runFullAnalysisPipeline(
         diagnosedConditions,
         drugInteractions
     );
-    
+
     // Step 6: Generate medication insights (Section 4: Why meds prescribed + treatment goal)
     const medicationInsights = await generateMedicationInsights(
         extractedData.medications,
         extractedData.conditions
     );
-    
+
     // Step 7: Generate food recommendations with nutrition (Section 2)
     const foodRecommendations = await generateFoodRecommendations(
         extractedData.conditions,
         extractedData.medications,
         diagnosedConditions
     );
-    
+
     // Step 8: Generate safety Q&A (Section 3)
     const safetyInsights = await generateSafetyInsights(
         extractedData.conditions,
@@ -1361,7 +1360,7 @@ export async function runFullAnalysisPipeline(
         drugInteractions,
         diagnosedConditions
     );
-    
+
     // Step 9: Generate final output (Section 1: Comprehensive Summary)
     const result = await generateFinalInsights(
         extractedText,
@@ -1373,10 +1372,10 @@ export async function runFullAnalysisPipeline(
         doctorAssessment,
         diagnosedConditions
     );
-    
+
     // Step 10: Store in database
     await storeAnalysisResult(documentId, userId, result, extractedText);
-    
+
     console.log('\n' + '='.repeat(60));
     console.log(`${LOG_PREFIX} ✅ PIPELINE COMPLETE`);
     console.log(`${LOG_PREFIX} Key findings: ${result.keyFindings.length}`);
@@ -1386,6 +1385,6 @@ export async function runFullAnalysisPipeline(
     console.log(`${LOG_PREFIX} Safety Q&A: ${result.safetyInsights.length}`);
     console.log(`${LOG_PREFIX} Safety insights: ${result.safetyInsights.length}`);
     console.log('='.repeat(60) + '\n');
-    
+
     return result;
 }

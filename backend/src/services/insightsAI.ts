@@ -13,7 +13,6 @@ dotenv.config();
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
-    baseURL: process.env.OPENAI_BASE_URL,
 });
 
 export interface InsightSection {
@@ -178,7 +177,7 @@ export async function generateStructuredInsights(
 
     try {
         const response = await openai.chat.completions.create({
-            model: 'gpt-4',
+            model: 'gpt-4o',
             messages: [
                 { role: 'system', content: INSIGHT_SYSTEM_PROMPT },
                 { role: 'user', content: `MEDICAL DOCUMENT:\n${documentText}` }
@@ -290,7 +289,7 @@ export async function storeInsight(
             sections: insight.sections,
             action_list: insight.followUpActions || insight.actions || [],
             chart_data: insight.charts,
-            model_used: 'gpt-4',
+            model_used: 'gpt-4o',
             is_current: true
         });
 
@@ -488,7 +487,7 @@ export async function generateHealthPredictions(
         };
 
         const response = await openai.chat.completions.create({
-            model: 'gpt-4',
+            model: 'gpt-4o',
             messages: [
                 { role: 'system', content: PREDICTION_SYSTEM_PROMPT },
                 { role: 'user', content: `PATIENT DATA:\n${JSON.stringify(context, null, 2)}` }
