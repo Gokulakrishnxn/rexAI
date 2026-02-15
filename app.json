@@ -37,7 +37,6 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      "expo-router",
       "expo-secure-store",
       "expo-asset",
       [
@@ -47,9 +46,6 @@
         }
       ]
     ],
-    "experiments": {
-      "typedRoutes": true
-    },
     "extra": {
       "supabaseUrl": "https://fdyvdfzoduflveibcwlp.supabase.co",
       "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZkeXZkZnpvZHVmbHZlaWJjd2xwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyMDUwNzIsImV4cCI6MjA4NTc4MTA3Mn0.NMXswkHHkJGEKyIKl06akPQU5a29ok6XWmrvQok1ArY",
