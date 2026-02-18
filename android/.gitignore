@@ -1,0 +1,19 @@
+# Build artifacts
+.gradle/
+build/
+*.iml
+.idea/
+local.properties
+.cxx/
+.externalNativeBuild/
+
+# Keep source files
+!app/src/
+!app/build.gradle
+!app/proguard-rules.pro
+!gradlew
+!gradlew.bat
+!gradle/
+!build.gradle
+!settings.gradle
+!gradle.properties
