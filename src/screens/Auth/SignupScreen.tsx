@@ -20,6 +20,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import Constants from 'expo-constants';
+import * as Crypto from 'expo-crypto';
 
 import { useAuthStore } from '@/store/useAuthStore'; // Import store
 
@@ -132,7 +133,8 @@ export function SignupScreen({ navigation }: Props) {
       const token = await fbUser.getIdToken();
 
       // 2. Create record in our 'users' table via backend
-      const { success: onboardSuccess, error: onboardError } = await onboardUser({
+      const qr_uid = Crypto.randomUUID();
+      const response = await onboardUser({
         name,
         age,
         gender,
@@ -141,30 +143,31 @@ export function SignupScreen({ navigation }: Props) {
 
         abha_number: abhaNumber,
         aadhar_number: aadharNumber,
+        qr_uid,
         role: 'patient'
       }, token);
 
-      if (!onboardSuccess) {
+      if (!response.success) {
         // If onboarding fails, rollback authentication
         await firebaseAuth.signOut();
-        throw new Error(onboardError || 'Failed to sync profile');
+        throw new Error(response.error || 'Failed to sync profile');
       }
 
       // Success! Auto-login via store
       console.log('Signup and Onboarding Successful. Auto-logging in...');
 
+      const backendProfile = response.profile;
+
       // Manually set profile in store to bypass auth listener delay/fetch
       useAuthStore.getState().setProfile({
-        id: fbUser.uid, // This ID might need to match backend ID, but setProfile uses it for session check
-        // Ideally we should use the returned profile from backend
-        ...userCredential.user, // Partial match
+        id: fbUser.uid,
+        ...fbUser,
+        ...backendProfile, // Use backend data if available
         ...{
-          id: (onboardSuccess as any)?.profile?.id, // Get ID from backend response if available
-          email: email,
-          name: name,
           role: 'patient',
           firebase_uid: fbUser.uid,
-          onboarding_completed: false // Force false to show walkthrough
+          onboarding_completed: false, // Force false to show walkthrough
+          qr_uid: qr_uid // Ensure qr_uid is explicitly set
         } as any
       });
 

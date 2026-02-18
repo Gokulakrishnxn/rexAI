@@ -7,6 +7,13 @@ dotenv.config({ path: path.join(__dirname, 'backend', '.env') });
 module.exports = ({ config }) => {
     return {
         ...config,
+        icon: "./assets/rexdark.png",
+        primaryColor: "#3B82F6",
+        splash: {
+            image: "./assets/rexdark.png",
+            resizeMode: "contain",
+            backgroundColor: "#ffffff"
+        },
         extra: {
             supabaseUrl: process.env.SUPABASE_URL,
             supabaseAnonKey: process.env.SUPABASE_ANON_KEY,

@@ -1,6 +1,7 @@
 import { Response, Router } from 'express';
 import { supabase } from '../utils/supabase.js';
 import { verifyFirebaseOnly, FirebaseRequest } from '../middleware/firebase_auth.js';
+import crypto from 'node:crypto';
 
 const router = Router();
 
@@ -11,9 +12,14 @@ const router = Router();
 router.post('/onboard', verifyFirebaseOnly as any, async (req: FirebaseRequest, res: Response) => {
     try {
         const firebaseUser = req.firebaseUser!;
-        const { name, age, gender, blood_group, emergency_contact, role, abha_number, aadhar_number } = req.body;
+        let { name, age, gender, blood_group, emergency_contact, role, abha_number, aadhar_number, qr_uid } = req.body;
 
         console.log(`[Backend] Onboarding user: ${firebaseUser.email} (${firebaseUser.uid})`);
+
+        // Ensure qr_uid exists
+        if (!qr_uid) {
+            qr_uid = crypto.randomUUID();
+        }
 
         const { data, error } = await supabase
             .from('users')
@@ -27,6 +33,7 @@ router.post('/onboard', verifyFirebaseOnly as any, async (req: FirebaseRequest, 
                 emergency_contact: emergency_contact || null,
                 abha_number: abha_number || null,
                 aadhar_number: aadhar_number || null,
+                qr_uid: qr_uid,
                 role: role || 'patient',
                 onboarding_completed: false // Force false to show walkthrough
             }, {
@@ -55,7 +62,7 @@ router.post('/onboard', verifyFirebaseOnly as any, async (req: FirebaseRequest, 
 router.get('/', verifyFirebaseOnly as any, async (req: FirebaseRequest, res: Response) => {
     try {
         const firebaseUser = req.firebaseUser!;
-        const { data, error } = await supabase
+        let { data, error } = await supabase
             .from('users')
             .select('*')
             .eq('firebase_uid', firebaseUser.uid)
@@ -65,6 +72,22 @@ router.get('/', verifyFirebaseOnly as any, async (req: FirebaseRequest, res: Res
 
         if (!data) {
             return res.status(404).json({ success: false, error: 'User not found' });
+        }
+
+        // AUTO-GENERATE QR UID if missing (for legacy/existing users)
+        if (!data.qr_uid) {
+            const newQrUid = crypto.randomUUID();
+            console.log(`[Backend] Auto-generating QR UID for user ${firebaseUser.email}`);
+            const { data: updatedUser, error: updateError } = await supabase
+                .from('users')
+                .update({ qr_uid: newQrUid })
+                .eq('id', data.id)
+                .select()
+                .single();
+
+            if (!updateError && updatedUser) {
+                data = updatedUser;
+            }
         }
 
         res.json({ success: true, profile: data });

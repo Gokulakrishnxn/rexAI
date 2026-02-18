@@ -20,6 +20,7 @@ interface UserProfile {
   abha_number?: string;
   aadhar_number?: string;
   onboarding_completed?: boolean;
+  qr_uid?: string;
 }
 
 interface AuthState {

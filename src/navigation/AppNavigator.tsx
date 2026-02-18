@@ -12,7 +12,7 @@ import { EmergencyModeScreen } from '../screens/Home/EmergencyModeScreen';
 import { LoginScreen } from '../screens/Auth/LoginScreen';
 import { SignupScreen } from '../screens/Auth/SignupScreen';
 import { CompleteProfileScreen } from '../screens/Auth/CompleteProfileScreen';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, View, Image } from 'react-native';
 
 export type RootStackParamList = {
   Auth: undefined;
@@ -71,8 +71,22 @@ export function AppNavigator() {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
-        <ActivityIndicator size="large" color="#007AFF" />
+      <View style={{
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#FFFFFF'
+      }}>
+        <Image
+          source={require('../../assets/rexdark.png')}
+          style={{
+            width: 140,
+            height: 140,
+            marginBottom: 20
+          }}
+          resizeMode="contain"
+        />
+        <ActivityIndicator size="small" color="#3B82F6" />
       </View>
     );
   }

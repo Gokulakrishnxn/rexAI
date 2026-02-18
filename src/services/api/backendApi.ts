@@ -412,6 +412,7 @@ export const onboardUser = async (profileData: {
     emergency_contact?: string;
     abha_number?: string;
     aadhar_number?: string;
+    qr_uid?: string;
     role?: string;
 }, token?: string): Promise<{ success: boolean; profile?: any; error?: string }> => {
     try {
